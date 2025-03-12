@@ -1,0 +1,70 @@
+---
+title: "inspect_specific_study"
+output: html_document
+---
+
+To look at the details of a specific study in plots
+
+```{r setup}
+library(tidyverse)
+library(ggplot2)
+library(patchwork)
+library(copula)
+library(CopulaSEJ)
+
+file_name <- "output/data49_nov24.rds"
+data_list_form <- readRDS(file_name)
+data_to_study <- data_list_form[[15]]
+```
+
+
+```{r}
+single_df <- data_to_study
+calibration_score <- calibrationScore(single_df)
+study_test_performance(single_df, default_simulation_params(copula_model="frank", interpolation="linear", prediction_method = "copula_calibration"))
+```
+```{r}
+
+plot_distributions(interpolate_distributions(single_df |> add_0_and_100_percentiles() |> filter(question_id==5)))
+
+
+plot_distributions(interpolate_distributions(single_df |> add_0_and_100_percentiles() |> filter(question_id==5 & expert_id %in% c(10,12,14))))
+
+posterior <- create_copula_posterior(error_copula, question_distributions)
+```
+
+```{r}
+# difficult studies:
+# 5 <- does not converge with family_set 'all'. Unclear what the problem is
+# 7 <- has 144 dimensions when using 
+study_id <- 1
+study <- data_list_form[[study_id]]
+nr_questions = study$question_id |> unique() |> length()
+# put 0 values to 0.0001
+study <- study |> mutate(`5th percentile` = ifelse(`5th percentile` == 0, 0.0001, `5th percentile`))
+
+error_metric = get_ratio_error_metric()
+summarizing_function = get_three_quantiles_summarizing_function()
+params <- default_simulation_params(copula_model = "vine", prediction_method = "copula_assumption", error_metric = error_metric, summarizing_function = summarizing_function)
+study_test_performance(study, params)
+
+test_question_id <- 5
+test_set <- study |> filter(question_id == test_question_id)
+training_set <- study |> filter(question_id != test_question_id)
+error_obs <- split_dataframe_to_error_observations(training_set,error_metric, summarizing_function$f)
+pseudo_obs <- rvinecopulib::pseudo_obs(error_obs)
+copula <- rvinecopulib::vinecop(pseudo_obs, family_set = "onepar")
+copula
+
+copula_dim <- dim(copula)[[1]]
+
+u <- runif(100000 * copula_dim) |> matrix(ncol = copula_dim)
+density_points <- rvinecopulib::dvinecop(u, copula, cores = 2)
+# time dvinecop
+four_core_time <- system.time(rvinecopulib::dvinecop(u, copula, cores = 4))
+two_core_time <- system.time(rvinecopulib::dvinecop(u, copula, cores = 2))
+single_core_time <- system.time(rvinecopulib::dvinecop(u, copula, cores = 1))
+
+```
+
+

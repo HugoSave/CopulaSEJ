@@ -1,0 +1,32 @@
+---
+title: "error_vs_rel_error_copula"
+output: html_document
+---
+
+```{r setup}
+library(tidyverse)
+library(ggplot2)
+library(patchwork)
+
+source("Functions/load_data.R")
+source("Functions/calibrationScore.R")
+source("Functions/CrossValidation.R")
+source("Functions/linear_distribution_estimation.R")
+source("Functions/create_copula_posterior.R")
+source("Functions/cubic_spline_distribution_estimation.R")
+
+file_name <- "Output/formatted_data.rds"
+data_list_form <- readRDS(file_name)
+
+```
+
+```{r}
+p_rel_error_metric <- default_simulation_params(dep_error_metric="rel_error")
+p_error_metric <- default_simulation_params(dep_error_metric="error")
+
+rel_error_result <- run_analysis_per_study(data_list_form[1:5], p_rel_error_metric)
+error_result  <- run_analysis_per_study(data_list_form[1:5], p_error_metric)
+
+```
+
+

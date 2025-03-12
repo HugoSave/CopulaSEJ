@@ -1,0 +1,34 @@
+---
+title: "dataset_overview"
+output: html_document
+---
+
+```{r setup}
+library(tidyverse)
+library(ggplot2)
+library(purrr)
+library(knitr)
+library(patchwork)
+library(copula)
+library(scales)
+library(knitr)
+library(CopulaSEJ)
+
+file_name <- "output/data49_nov24.rds"
+studies <- readRDS(file_name)
+```
+
+```{r}
+nr_studies = length(studies)
+# nr of questions per study
+nr_questions = map_dbl(studies, \(study) length(unique(study$question_id))) 
+nr_experts = map_dbl(studies, \(study) length(unique(study$expert_id)))
+dimensions_for_three_quantiles = nr_experts * 3
+```
+
+```{r}
+
+dimensions_for_three_quantiles
+```
+
+

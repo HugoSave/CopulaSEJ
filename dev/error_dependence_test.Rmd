@@ -1,0 +1,252 @@
+---
+title: "error_dependence_test"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(patchwork)
+library(copula)
+library(scales)
+library(energy)
+library(knitr)
+
+
+source("copula analysis.R")
+source("Functions/load_data.R")
+source("Functions/calibrationScore.R")
+source("Functions/CrossValidation.R")
+source("Functions/linear_distribution_estimation.R")
+source("Functions/create_copula_posterior.R")
+source("Functions/cubic_spline_distribution_estimation.R")
+source("Functions/summarizing_functions.R")
+
+file_name <- "Output/formatted_data.rds"
+data_list_form <- readRDS(file_name)
+
+```
+For every study we would want to calculate some error metric for each question. Then calculate the dCov between the error metric and the question. 
+```{r}
+calculate_errors <- function(study_data, m_func, e_func, percentiles=c(5,50,95), flattened=TRUE) {
+  if (nrow(study_data) == 0) {
+    stop("Must have atleast one data row")
+  }
+  percentiles_col_names = k_percentiles_to_colname(percentiles)
+  question_ids = sort(unique(study_data$question_id))
+  expert_ids = sort(unique(study_data$expert_id))
+  
+  m_length = m_func(study_data[percentiles_col_names][1,]) |> length()
+  nr_questions = length(question_ids)
+  
+  error_data = array(NA, dim = c(nr_questions, length(expert_ids), m_length))
+  realizations = array(NA, dim = c(nr_questions, 1))
+  
+  for (q_id in question_ids){
+    for (e_id in expert_ids){
+      # get the data for the expert and question
+      data = study_data |> filter(expert_id == e_id & question_id == q_id)
+      if (nrow(data) != 1) {
+        # print q_id and e_id
+        stop(paste("Must have exactly one data row. Error for q:id", q_id, "e_id:", e_id))
+      }
+      
+      assessments = data |> select(all_of(percentiles_col_names))
+      m = m_func(assessments) # removes column names
+      q = data$realization
+      errors = as.vector(e_func(m, q), "double")
+      error_data[q_id, e_id, ] = errors
+      if (e_id == 1) {
+        realizations[q_id, 1] = data$realization
+      }
+    }
+  }
+  if (flattened) {
+    error_flattened <- matrix(aperm(error_data, c(1,3,2)), nrow=nr_questions)
+    return(list(error_flattened=error_flattened, realizations=realizations))
+  } else {
+    return(list(error=error_data, realizations=realizations))
+  }
+}
+
+error_difference <- function(m, q){
+  # m is a D length vector. q is a scalar. Returns a D length vector
+  return(m - q)
+}
+
+error_difference_2 <- function(m, q){
+  # m is a D length vector. q is a scalar. Returns a D length vector
+  return(q-m)
+}
+
+error_relative <- function(m, q){
+  # m is a D length vector. q is a scalar. Returns a D length vector
+  return((q - m) / q)
+}
+
+error_relative_m_denom <- function(m, q){
+  # m is a D length vector. q is a scalar. Returns a D length vector
+  return((q - m) / m)
+}
+
+error_symm_relative <- function(m, q){
+  # m is a D length vector. q is a scalar. Returns a D length vector
+  ret_m = (q-m)/(m+q)
+  # if some of the m elements are 0 while also q are 0, return 1 for those indices
+  # if (q == 0) {
+  #   m_zero_indices = which(m == 0)
+  #   ret_m[m_zero_indices] = 1
+  #   return(ret_m)
+  # }
+  return(ret_m)
+}
+
+# Log transform should not change anything
+# error_log <- function(m, q){
+#   # m is a D length vector. q is a scalar. Returns a D length vector
+#   return(log(q/m))
+# }
+# 
+# error_log_2 <- function(m, q){
+#   # m is a D length vector. q is a scalar. Returns a D length vector
+#   return(log(m/q))
+# }
+
+error_ratio <- function(m, q){
+  # m is a D length vector. q is a scalar. Returns a D length vector
+  return(m/q)
+}
+
+
+
+
+metrics = list(
+  list(m=m_median, e=error_difference_2, name="median and q-m"),
+  #list(m=m_median, e=error_relative, name="median and (q-m)/q"),
+  #list(m=m_median, e=error_relative_m_denom, name="median and (q-m)/m"),
+  list(m=m_median, e=error_symm_relative, name="median and (q-m)/(m+q)"),
+  #list(m=m_median, e=error_log, name="median and log(q/m)"),
+  #list(m=m_median, e=error_log_2, name="median and log(m/q)"),
+  list(m=m_median, e=error_ratio, name="median and m/q"),
+  list(m=m_three_quantiles, e=error_difference_2, name="3 quantiles and q-m"),
+  #list(m=m_three_quantiles, e=error_relative, name="3 quantiles and (q-m)/q"),
+  #list(m=m_three_quantiles, e=error_relative_m_denom, name="3 quantiles and (q-m)/m"),
+  list(m=m_three_quantiles, e=error_symm_relative, name="3 quantiles and (q-m)/(m+q)"),
+  list(m=m_three_quantiles, e=error_ratio, name="3 quantiles and m/q")
+  #list(m=m_3_quantiles, e=error_log, name="3 quantiles and log(q/m)")
+)
+
+
+percentiles = c(5,50,95)
+dcors = list()
+for (study_id in seq_along(data_list_form)) {
+  print(paste("Running study:", study_id))
+  combined_data <- data_list_form[[study_id]] |> bind_rows()
+  # for each study_id and expert id, calculate the median. Output as matrix
+  
+  nr_questions = length(unique(combined_data$question_id))
+  
+  study_results = map(metrics, \(m_e) {
+    error_data = calculate_errors(combined_data, m_e$m, m_e$e)
+    # check if inf
+    if (!all(is.finite(error_data$error_flattened))) {
+      return(list(dcor=NA, name=m_e$name, study_id=study_id, dcor_test=NA, dcor_T_test=NA))
+    }
+    dcorT_result = dcorT.test(error_data$error_flattened, error_data$realizations)
+    dcor_result = dcor.test(error_data$error_flattened, error_data$realizations, R=200)
+    list(dcor=dcor_result$estimates["dCor"], name=m_e$name, study_id=study_id, dcor_test=dcor_result, dcor_T_test=dcorT_result)
+  })
+  # concat a and dcors
+  dcors = c(dcors, study_results)
+  # for question id
+}
+dcors_df = dcors |> map_dfr(~tibble(study_id=.x$study_id, dcor=.x$dcor, name=.x$name,
+                                    dcor_test=list(.x$dcor_test),
+                                    dcor_T_test=list(.x$dcor_T_test))) |> mutate(study_id=factor(study_id))
+dcors_df
+```
+```{r}
+dcors_df |> filter(!is.na(dcor)) |> ggplot(aes(x=name, y=dcor)) + geom_boxplot()  + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+```{r}
+dcors_df$dcor_corrected =  dcors_df$dcor_T_test |> map_dbl(\(x) {
+   if (identical(x, NA)){
+     return(NA)
+   }
+   x$estimate}
+   )
+
+nr_not_na = dcors_df |> group_by(name) |> summarize(nr_na=is.na(dcor_corrected) %>% sum(), nr_not_na = (!is.na(dcor_corrected)) %>% sum())
+
+# |> map_if(\(x) x$estimate)
+p <- dcors_df |> filter(!is.na(dcor_corrected)) |> ggplot(aes(x=name, y=dcor_corrected)) + geom_boxplot()  + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab(NULL)  + theme(plot.margin = margin(20, 10, 10, 20)) 
+# save plot
+
+# add the number of studies with not na values as text label
+p <- p + geom_text(data=nr_not_na, aes(x=name, y=1.1, label=nr_not_na), vjust=0, hjust=0.4) +  coord_cartesian(ylim = c(-0.5, 0.99), clip = 'off') 
+
+ggsave("Output/dcor_corrected.png", p, width=10, height=5)
+p
+```
+
+```{r}
+# find the indices 
+# study 46 has some negative bias corrected dcor
+dcors_df$dcor_T_test[c(226, 229)]
+
+```
+```{r}
+extract_summarizing_function <- Vectorize(function(name_str) {
+  # write a vectorized version of below
+  if (str_starts(name_str, "median")) {
+    summarising_func = "median"
+  } else if (str_starts(name_str, "3 quantiles")) {
+    summarising_func = "3 quantiles"
+  } else {
+    stop("Name must start with median or 3 quantiles")
+  }
+  return(summarising_func)
+})
+extract_error_metric <- function(name_str) {
+  error_metric = str_extract(name_str, "and (.*)")
+  # remove and
+  return(str_remove(error_metric, "and "))
+}
+nr_studies = length(unique(dcors_df$study_id))
+# get the t test p values for the corrected dcor
+a = dcors_df |> filter(!is.na(dcor_corrected)) |> rowwise() |> mutate(dcor_T_p_value = dcor_T_test$p.value)
+
+a = a |> mutate("Summarizing function" = extract_summarizing_function(name), "Error metric" =extract_error_metric(name)) |> 
+  group_by(study_id, `Summarizing function`) |> mutate("Best in study"=if_else(dcor_corrected == min(dcor_corrected), T,F)) |> ungroup()
+# plot histogram of p value
+a |> filter(!is.nan(dcor_T_p_value)) |> ggplot(aes(x=dcor_T_p_value)) + geom_histogram(bins=20)
+# for each name get the percentage of p values less than 0.05
+table = a |> filter(!is.nan(dcor_T_p_value)) |> group_by(`Summarizing function`, `Error metric`) |> summarize("H_0 Rejected (% of studies)" = paste(round(mean(dcor_T_p_value < 0.05)*100), "%", sep=""),
+ `Lowest modifed dCor (% of studies with same summarizing function)`=str_glue("{prettyNum(100*sum(`Best in study`)/nr_studies, digits=2)}%")) #|> pivot_wider(names_from = `Summarizing function`, values_from = `Percentage Rejected`)
+# print as latex table
+table
+table_latex = table |> kable("latex", format.args = list(digits=2))
+```
+```{r}
+# look for each study which one has the lowset cor value
+dcors_df |> filter(!is.na(dcor_corrected)) |> group_by(study_id) |> summarize(min_dcor_corrected = min(dcor_corrected), method = name[which.min(dcor_corrected)]) |> count(method)
+```
+
+```{r}
+# select names that start with '3'
+dcors_df |> filter(!is.na(dcor_corrected)& str_starts(name, "3")) |> group_by(study_id) |> summarize(min_dcor_corrected = min(dcor_corrected), method = name[which.min(dcor_corrected)]) |> count(method)
+dcors_df |> filter(!is.na(dcor_corrected)& str_starts(name, "median")) |> group_by(study_id) |> summarize(min_dcor_corrected = min(dcor_corrected), method = name[which.min(dcor_corrected)]) |> count(method)
+```
+```{r}
+# looking at studies with positive values
+study_id_with_negatives = dcors_df |> filter(name == "3 quantiles and log(q/m)" & !is.na(dcor_corrected)) |> select(study_id) |> unique()
+study_id_with_negatives
+```
+```{r}
+# Only 14 studies with non negative quantiles and estimates
+```
+
+```{r}
+
+```
+

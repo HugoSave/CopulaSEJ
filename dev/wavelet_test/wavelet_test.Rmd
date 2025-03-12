@@ -1,0 +1,22 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r}
+
+```
+
+```{r}
+#
+# Let's generate a bi-modal artificial set of data.
+#
+x <- c(rnorm(100), rnorm(100, 10))
+#
+# Now perform simple wavelet density estimate
+#
+wde <- wavethresh::CWavDE(x, Jmax=1, threshold=1)
+
+plot(wde$x, wde$y, type="l")
+```
+

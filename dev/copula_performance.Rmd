@@ -1,0 +1,223 @@
+---
+title: "copula_performance"
+output: html_document
+---
+
+```{r setup}
+library(tidyverse)
+library(ggplot2)
+library(purrr)
+library(knitr)
+library(patchwork)
+library(copula)
+library(scales)
+library(knitr)
+library(CopulaSEJ)
+source("dev_utils.R")
+
+file_name <- "output/data49_nov24.rds"
+studies <- readRDS(file_name)
+studies <- filter_studies_few_questions(studies, min_questions=10)
+studies <- filter_study_remove_ids(studies, study_ids=7) 
+
+percentile_names <- k_percentiles_to_colname(c(5, 50, 95))
+
+list_mod <- change_value_in_study_list(studies, percentile_names, 0, 0.0001)
+studies_no_m_zero <- list_mod[[1]]
+modified_studies <- list_mod[[2]]
+
+```
+
+```{r}
+data_list_short <- studies_no_m_zero[1:5]
+params <- default_simulation_params(copula_model = "joe", prediction_method = "copula_calibration")
+params <- default_simulation_params(copula_model = "frank", prediction_method = "copula")
+params <- default_simulation_params(copula_model = "frank", prediction_method = "equal_weights")
+params <- default_simulation_params(copula_model = "frank", prediction_method = "global_opt")
+analysis_res <- run_analysis_per_study(data_list_short, params)
+
+prediction_methods = c("copula_calibration", "copula_error_density", "equal_weights", "global_opt")
+params <- default_simulation_params(copula_model = "joe", prediction_method = "copula_assumption")
+error_metrics = list(get_ratio_error_metric(), get_linear_error_metric())
+summarizing_functions = list(get_three_quantiles_summarizing_function(), get_median_summarizing_function())
+
+results <- list()
+warnings <- list()
+for (error_metric in error_metrics) {
+  for (summarizing_function in summarizing_functions) {
+    print(paste("Analyzing error metric:", error_metric$name, ", and summarizing function:", summarizing_function$name))
+    
+    params <- default_simulation_params(copula_model = "vine", prediction_method = "copula_assumption", error_metric = error_metric, summarizing_function = summarizing_function)
+    
+    analysis_res <- run_analysis_per_study(data_list_short, params)
+    analysis_res$results["prediction_method"] <- glue::glue("copula_assumption:{error_metric$name}:{summarizing_function$name} summarizer")
+    results <- append(results, list(analysis_res$results))
+    warnings <- append(warnings, list(analysis_res$warnings))
+  }
+}
+# for all combinations of error metric ans summarizing functions
+
+
+# loop through studies in data_list_form
+for (prediction_method in prediction_methods) {
+  params <- default_simulation_params(copula_model = "joe", prediction_method = prediction_method)
+  sim_res <- run_analysis_per_study(data_list_short, params)
+  sim_res$results["prediction_method"] <- prediction_method
+  results <- append(results, list(sim_res$results))
+  warnings <- append(warnings, list(sim_res$warnings))
+}
+results_df <- dplyr::bind_rows(results)
+
+saveRDS(results_df, "Output/performance_comparison_new.rds")
+results_df <- readRDS("output/performance_comparison.rds")
+
+pos_values <- results_df |> filter(realization>0 & prediction>0) |> 
+  ggplot(aes(realization, prediction, color=prediction_method)) +
+  geom_point() +
+  # add dashed x=y line
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+  coord_fixed(ratio = 1) +
+  labs(title = "Postivie Predicted and Realized Values",
+       x = "Realized Value",
+       y = "Predicted Value") +
+  scale_y_continuous(trans = "log10")+
+  scale_x_continuous(trans =  "log10")+
+  facet_wrap(~prediction_method) +
+  theme_minimal()
+
+abs_values <- results_df |> filter(realization!=0 & prediction!=0) |> mutate(realization=abs(realization), prediction=abs(prediction)) |> 
+  ggplot(aes(realization, prediction, color=prediction_method)) +
+  geom_point() +
+  # add dashed x=y line
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+  coord_fixed(ratio = 1) +
+  labs(title = "Predicted and Realized Values",
+       x = "abs(Realized Value)",
+       y = "abs(Predicted Value)") +
+  scale_y_continuous(trans = "log10")+
+  scale_x_continuous(trans =  "log10")+
+  facet_wrap(~prediction_method) +
+  theme_minimal()
+
+pos_values
+
+abs_values
+
+```
+```{r, fig.width=10}
+abs_values <- results_df |> filter(realization!=0 & prediction!=0) |> mutate(realization=abs(realization), prediction=abs(prediction)) |> 
+  ggplot(aes(realization, prediction, color=prediction_method)) +
+  geom_point() +
+  # add dashed x=y line
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+  coord_fixed(ratio = 1) +
+  labs(title = "Predicted and Realized Values",
+       x = "abs(Realized Value)",
+       y = "abs(Predicted Value)") +
+  scale_y_continuous(trans = "log10")+
+  scale_x_continuous(trans =  "log10")+
+  facet_wrap(~prediction_method) +
+  theme_minimal()
+ggsave("Output/abs_values.pdf", abs_values, width = 10, height = 10)
+abs_values
+```
+
+# Look at relative error
+```{r}
+# count number of infinite rel_error
+nr_prediction_methods = length(unique(results_df$prediction_method))
+nr_0_realizations <- results_df |> filter(rel_error == Inf) |> nrow() / nr_prediction_methods
+# should yield the same
+nr_0_realizations_other <- results_df |> filter(realization == 0)  |> nrow() / nr_prediction_methods
+stopifnot(nr_0_realizations == nr_0_realizations_other)
+print(paste("Number of infinite relative errors: ", nr_0_realizations))
+
+
+
+
+results_df |> filter(realization != 0 & abs(rel_error) < 10 & study_id <= 20) |> #filter(!(prediction_method %in% c("copula"))) |>
+  ggplot(aes(prediction_method, rel_error)) +
+  geom_violin() +
+  labs(title = "Relative Error by Study",
+       x = "Study ID",
+       y = "Relative Error") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+```{r}
+# some plot that per study shows the prediction of a specific method
+pred_method = "equal_weights"
+
+nr_studies <- length(studies)
+breaks <- unique(c(1, seq(from=10, to=nr_studies, by=10), nr_studies))
+minor_b <- 1:nr_studies
+
+rel_error_per_plot <- results_df |> filter(realization!=0 & abs(rel_error) < 50) |> ggplot(aes(study_id, rel_error, group=study_id)) +
+  geom_boxplot() + facet_grid(rows=vars(prediction_method)) + 
+  scale_x_continuous(breaks = breaks, minor_breaks=minor_b) +
+  labs(x = "Study ID",
+       y = "Relative Error")
+
+nr_filtered_points <- results_df |> filter(realization!=0 & abs(rel_error) < 50) |> nrow()
+nr_away_filtered_points <- results_df |> nrow() - nr_filtered_points
+# lowest number of points for a study
+min_points <- study_data |> filter(realization!=0 & abs(rel_error) < 50) |> group_by(study_id, prediction_method) |>
+  summarise(n=n(), .groups="keep") |> pull(n) |> which.min()
+
+ggsave("Output/rel_error_per_plot.pdf", rel_error_per_plot, width = 10, height = 10)
+rel_error_per_plot
+```
+
+```{r}
+
+results_df |> filter(realization!=0) |> group_by(prediction_method) |> summarise(MAPE = mean(abs(rel_error)), RMSPE = mean(rel_error^2), MAXPE = max(abs(rel_error)))
+
+results_df |> filter(realization!=0 & abs(rel_error) < 10) |> group_by(prediction_method) |> summarise(MAPE = mean(abs(rel_error)), RMSPE = mean(rel_error^2), MAXPE = max(abs(rel_error)))
+```
+
+```{r}
+nr_studies <- length(unique(results_df$study_id))
+# Look at per study, which prediction method performed the best?
+error_metrics_per_study <- results_df |> filter(realization!=0 & abs(rel_error) < 10) |> group_by(study_id, prediction_method) |> 
+  summarise(MAPE = mean(abs(rel_error)), RMSPE = mean(rel_error^2), MAXPE = max(abs(rel_error)), .groups="drop")
+
+# check the number of times each prediction method performed the best
+best_prediction_method_per_study <- error_metrics_per_study |> 
+  group_by(study_id) |> 
+  summarise(MAPE = prediction_method[which.min(MAPE)], 
+            RMSPE= prediction_method[which.min(RMSPE)],
+            MAXPE=prediction_method[which.min(MAXPE)]) 
+
+proportion_table <- best_prediction_method_per_study |> 
+  pivot_longer(-study_id, names_to="error_metric", values_to = "prediction_method") |>
+  group_by(error_metric, prediction_method) |> summarise(n=n()/nr_studies, .groups="drop")  |>
+  pivot_wider(names_from = prediction_method, values_from = n) 
+
+proportion_table_formatted <- proportion_table |> mutate(across(where(is.numeric), ~round(.x*100, digits=1))) |> mutate(across(where(is.numeric), ~paste(.x, "%"))) 
+print(as.character(kable(proportion_table_formatted, "latex")))
+proportion_table
+
+```
+
+# Find and look at one of those high error estimates
+```{r}
+
+results_df |> filter(rel_error > 5000 & realization != 0) 
+
+study_id_inspect <- 33
+test_question_inspect <- 8
+
+study_data <- studies_no_m_zero[[study_id_inspect]] 
+test_set <- study_data |> filter(question_id==test_question_inspect) 
+training_set <- study_data |> filter(question_id!=test_question_inspect) 
+
+distributions <- interpolate_distributions(test_set |> add_0_and_100_percentiles(), interpolation="linear")
+plot_distributions(distributions)
+
+copulaDM <- create_copula_posterior_numerical_integration(indepCopula(10), distributions)
+copula_fit_and_predict(training_set, test_set, "indep", "linear")
+equal_weight_predict(test_set)
+
+```
+

@@ -1,0 +1,58 @@
+---
+title: "BiModalStudy"
+output: html_document
+---
+
+# First find a bimodal example
+
+```{r}
+
+file_name <- "Output/formatted_data.rds"
+data_list_form <- readRDS(file_name)
+
+
+# Find the bimodal example
+for (i in 1:length(data_list_form)){
+  data <- data_list_form[[i]]
+  combined_data <- data |> bind_rows()
+  
+  if (length(unique(data$y)) > 2){
+    print(i)
+    print(data$y)
+  }
+}
+```
+
+```{r, fig.width=10}
+study_id <- 3
+study_data <- data_list_form[[study_id]]
+combined_data <- study_data |> bind_rows()
+combined_data <- combined_data |> split(combined_data$question_id) |> map( \(df) add_0_and_100_percentiles(df, overshoot=0.1)) |> bind_rows()
+
+# for each question_id find the distributions
+distributions <- combined_data |> split(combined_data$question_id) |> map(interpolate_distributions)
+
+plots <- distributions |> map(\(dist) plot_distributions(dist, "pdf")) |> imap(\(p, i) p + labs(title=paste(i)))
+
+# make grid of plots
+wrap_plots(plots, ncol=3, guides="collect", axis_titles = "collect")
+
+```
+```{r}
+# for each question_id find the distributions. This depends on which question is seen as the target one
+target_question_id <-5
+training_set <- combined_data |> filter(question_id != target_question_id)
+test_set <- combined_data |> filter(question_id == target_question_id)
+test_distributions <- distributions[[target_question_id]]
+
+error_obs <- create_error_observations(training_set )
+copula <- find_copula(error_obs, copula_model = "frank")
+copula <- indepCopula(length(unique(training_set$expert_id)))
+DM_unnorm <- create_copula_posterior_unnormalized(copula, test_distributions)
+DM <- create_copula_posterior_numerical_integration(copula, test_distributions)
+DM_indep <- create_copula_posterior_numerical_integration(indepCopula(length(unique(training_set$expert_id))), test_distributions)
+plot_copula_posterior(DM)
+plot_copula_posterior(DM_indep)
+
+```
+

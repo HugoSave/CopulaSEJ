@@ -1,0 +1,15 @@
+---
+title: "copula_limitaitons"
+output: html_document
+---
+
+
+# Aims to show the limitaitons of the copula package
+
+```{r}
+library(copula)
+
+joe <- joeCopula(dim=6)
+joe@exprdist$pdf
+```
+
