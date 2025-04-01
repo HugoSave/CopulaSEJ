@@ -1,3 +1,5 @@
+library(CopulaSEJ)
+library(energy)
 
 load_data_49 <- function(relative_dev_folder=TRUE) {
   if (relative_dev_folder) {
