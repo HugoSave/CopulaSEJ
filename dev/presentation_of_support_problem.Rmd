@@ -1,0 +1,165 @@
+---
+title: "presentation_of_support_problem"
+output: html_document
+---
+
+```{r}
+#library(CopulaSEJ)
+devtools::load_all("../")
+source("dev_utils.R")
+studies <- load_data_49_filtered(relative_dev_folder = TRUE)
+k_percentiles <- c(5,50,95)
+summ_fun <- get_three_quantiles_summarizing_function()$f
+```
+# Example 1 : Ratio error
+```{r}
+study <- filter_study_keep_ids(studies, 5)[[1]]
+test_question_id <- 1
+test_set <- study |> filter(question_id == test_question_id)
+training_set <- study |> filter(question_id != test_question_id)
+test_m_matrix <- test_set |> study_df_single_question_to_assessment_matrix(summ_fun, k_percentiles)
+training_assessments <- training_set |> study_df_to_assessment_array(summ_fun, k_percentiles)
+ratio_metric <- get_ratio_error_metric()
+```
+```{r}
+res <- fit_and_construct_posterior(
+        training_assessments,
+        training_set |> study_df_to_realizations(),
+        test_m_matrix,
+        "vine",
+        ratio_metric,
+        vine_fit_settings = list(),
+        error_estimation_settings = list(out_of_boundary="clamp"),
+        q_not_cross_zero = TRUE
+      )
+print(glue::glue("Desired support: {paste0(res$posterior$support, collapse=',')}"))
+
+expert_id <- 3
+error_margins <- res$error_margins |> purrr::map(\(x) {
+  x$d = switch(x$d, "1" = "M5", "2" = "M50", "3" = "M95"); 
+  x$expert_id = paste0("E", x$expert_id);
+  x })
+exp_error_margins <- error_margins |> purrr::keep(\(x) x$expert_id == paste0("E", expert_id))
+  
+exp_error_margins |> plot_supports()
+```
+```{r}
+test_m_matrix
+```
+```{r}
+test_m_matrix[,2] |> median()
+```
+
+```{r}
+error_margins |> plot_supports()
+```
+```{r}
+error_margins |> plot_supports() + xlim(0, 10000)
+```
+```{r}
+res$errors[,,, drop=FALSE] |> plot_3d_errors()
+```
+```{r}
+res$errors[,expert_id,3, drop=FALSE] |> plot_3d_errors()
+```
+
+```{r}
+# 
+error_margins_exp <- res$error_margins |> purrr::keep(\(x) x$expert_id == expert_id && x$d==3) 
+error_margins_exp |> plot_distributions("pdf", overshoot = 0)
+```
+And zoomed in between 0 and 100:
+```{r}
+error_margins_exp |> plot_distributions("pdf", fix_range=c(0,100)) 
+```
+It kinda follows the observed error data shown before.
+
+So we get almost 0 for a large section of the support. Here numerical problems happen so for example
+while the pdf is non-zero for the whole support. 
+```{r}
+print(glue::glue("pdf(1000) = {error_margins_exp[[1]]$pdf(1000)}\n
+                 cdf(1000) = {error_margins_exp[[1]]$cdf(1000)}\n
+                 cdf(1000) == 1 = {error_margins_exp[[1]]$cdf(1000)==1}"))
+```
+
+```{r}
+q_marginals <- calculate_marginal_posteriors(res$error_margins, test_m_matrix, ratio_metric)
+q_marginals_f <- combine_lists_of_functions_to_function(q_marginals)
+exp_q_margins <- q_marginals  |> purrr::keep(\(x) x$expert_id == expert_id)
+exp_q_margins[3] |> plot_distributions("pdf")
+```
+We want to have support for q aorund 1 and lower but this margin gives 0 cdf value for values under 1.
+ Then the error is above 1500.
+
+```{r}
+exp_q_margins[[3]]$cdf(1)
+```
+
+That would not generally be a problem, as long as we have some section of the posterior
+with valid support. The problem however is that it turns out that there is always one
+of the expert whose 
+
+```{r}
+a <- res$posterior$logDM(1:10000)
+a
+any(is.finite(a))
+```
+
+```{r}
+q_marginals |> plot_distributions("pdf") + xlim(20,50)
+```
+What about if we look at close to the median? There surely the pdf should be non-zero
+```{r}
+q_marginals_f$cdfs(45)
+q_marginals_f$cdfs(45) |> rvinecopulib::dvinecop(res$error_copula)
+
+```
+
+
+
+# Example 2 : Linear error 
+```{r}
+study <- filter_study_keep_ids(studies, 16)[[1]]
+test_question_id <- 2
+test_set <- study |> filter(question_id == test_question_id)
+training_set <- study |> filter(question_id != test_question_id)
+test_m_matrix <- test_set |> study_df_single_question_to_assessment_matrix(summ_fun, k_percentiles)
+training_assessments <- training_set |> study_df_to_assessment_array(summ_fun, k_percentiles)
+error_metric <- get_linear_error_metric()
+
+res <- fit_and_construct_posterior(
+        training_assessments,
+        training_set |> study_df_to_realizations(),
+        test_m_matrix,
+        "vine",
+        error_metric,
+        vine_fit_settings = list(),
+        error_estimation_settings = list(out_of_boundary="clamp"),
+        q_not_cross_zero = FALSE
+      )
+```
+
+
+```{r}
+expert_id <- 7
+error_margins <- res$error_margins |> purrr::map(\(x) {
+  x$d = switch(x$d, "1" = "M5", "2" = "M50", "3" = "M95"); 
+  x$expert_id = paste0("E", x$expert_id);
+  x })
+exp_error_margins <- error_margins |> purrr::keep(\(x) x$expert_id == paste0("E", expert_id))
+  
+exp_error_margins |> plot_supports()
+```
+
+```{r}
+error_margins |> plot_supports()
+```
+
+```{r}
+res$errors[,expert_id,, drop=FALSE] |> plot_3d_errors()
+```
+```{r}
+res$errors[,expert_id,, drop=FALSE] |> 
+  plot_3d_errors()  |> plot_add_supports(exp_error_margins) + xlim(-1,2)
+```
+

@@ -11,46 +11,49 @@ library(ggplot2)
 library(patchwork)
 library(copula)
 library(CopulaSEJ)
+source("dev_utils.R")
 
 file_name <- "output/data49_nov24.rds"
-data_list_form <- readRDS(file_name)
-data_to_study <- data_list_form[[15]]
+studies <- readRDS(file_name) |> filter_studies_few_questions(min_questions = 11)
+data_list_form <- change_value_in_study_list(studies, k_percentiles_to_colname(c(5, 50, 95)), 0, 0.001)$study_list
 ```
 
 
 ```{r}
-single_df <- data_to_study
-calibration_score <- calibrationScore(single_df)
-study_test_performance(single_df, default_simulation_params(copula_model="frank", interpolation="linear", prediction_method = "copula_calibration"))
+# single_df <- data_to_study
+# calibration_score <- calibrationScore(single_df)
+# study_test_performance(single_df, default_simulation_params(copula_model="frank", interpolation="linear", prediction_method = "copula_calibration"))
+
+index <- 5
+study <- data_list_form[[index]]
+study_id <- study$study_id |> unique()
+
+nr_questions = study$question_id |> unique() |> length()
+nr_experts <- study$expert_id |> unique() |> length()
+print(paste("Study", study_id, "has", nr_questions, "questions and", nr_experts, "experts"))
+# put 0 values to 0.0001
+
+error_metric = get_linear_error_metric()
+#error_metric = get_ratio_error_metric()
+summarizing_function = get_three_quantiles_summarizing_function()
+#summarizing_function = get_linear_error_metric()
+params <- default_simulation_params(copula_model = "vine", prediction_method = "copula_assumption", error_metric = error_metric, summarizing_function = summarizing_function)
+#study_test_performance(study, params)
+
+test_question_id <- 2
+test_set <- study |> filter(question_id == test_question_id)
+training_set <- study |> filter(question_id != test_question_id)
 ```
 ```{r}
 
-plot_distributions(interpolate_distributions(single_df |> add_0_and_100_percentiles() |> filter(question_id==5)))
+plot_distributions(interpolate_distributions(test_set |> add_0_and_100_percentiles()))
 
-
-plot_distributions(interpolate_distributions(single_df |> add_0_and_100_percentiles() |> filter(question_id==5 & expert_id %in% c(10,12,14))))
-
-posterior <- create_copula_posterior(error_copula, question_distributions)
 ```
 
 ```{r}
 # difficult studies:
 # 5 <- does not converge with family_set 'all'. Unclear what the problem is
 # 7 <- has 144 dimensions when using 
-study_id <- 1
-study <- data_list_form[[study_id]]
-nr_questions = study$question_id |> unique() |> length()
-# put 0 values to 0.0001
-study <- study |> mutate(`5th percentile` = ifelse(`5th percentile` == 0, 0.0001, `5th percentile`))
-
-error_metric = get_ratio_error_metric()
-summarizing_function = get_three_quantiles_summarizing_function()
-params <- default_simulation_params(copula_model = "vine", prediction_method = "copula_assumption", error_metric = error_metric, summarizing_function = summarizing_function)
-study_test_performance(study, params)
-
-test_question_id <- 5
-test_set <- study |> filter(question_id == test_question_id)
-training_set <- study |> filter(question_id != test_question_id)
 error_obs <- split_dataframe_to_error_observations(training_set,error_metric, summarizing_function$f)
 pseudo_obs <- rvinecopulib::pseudo_obs(error_obs)
 copula <- rvinecopulib::vinecop(pseudo_obs, family_set = "onepar")
@@ -58,12 +61,155 @@ copula
 
 copula_dim <- dim(copula)[[1]]
 
-u <- runif(100000 * copula_dim) |> matrix(ncol = copula_dim)
-density_points <- rvinecopulib::dvinecop(u, copula, cores = 2)
-# time dvinecop
-four_core_time <- system.time(rvinecopulib::dvinecop(u, copula, cores = 4))
-two_core_time <- system.time(rvinecopulib::dvinecop(u, copula, cores = 2))
-single_core_time <- system.time(rvinecopulib::dvinecop(u, copula, cores = 1))
+pca_analysis <- function(pseudo_obs) {
+  pr <- prcomp(pseudo_obs, center = TRUE, scale = FALSE)
+  pr
+}
+
+project_onto_pca <- function(points, pca) {
+  scaled_points <- points |> scale(center=pca$center, scale=pca$scale) 
+  colnames(scaled_points) <- rownames(pca$rotation)
+  projected_points <- predict(pca, scaled_points)
+  projected_points
+}
+
+plot_error_obs_pca_and_path <- function(pseudo_obs, path) {
+  pr <- pca_analysis(pseudo_obs)
+  projected_errors <- pr$x
+  projected_path <- project_onto_pca(path, pr)
+  plot(projected_errors[,1], projected_errors[,2])#, xlim=c(-1,1), ylim=c(-1,1))
+  lines(projected_path[,1], projected_path[,2], col="red")
+}
+
+```
+```{r}
+
+naive_median_estimate <- test_set$`50th percentile`  |> median()
+naive_mean_estimate <- test_set$`50th percentile`  |> mean()
+print(paste("Naive median estimate:", naive_median_estimate))
+print(paste("Naive mean estimate:", naive_mean_estimate))
+```
+
+# Look at error distributions
+```{r, fig.height=12}
+k_percentiles <- c(5,50,95)
+test_m_matrix <- test_set |> study_df_single_question_to_assessment_matrix(summarizing_function$f, k_percentiles)
+training_assessments <- training_set |> study_df_to_assessment_array(summarizing_function$f, k_percentiles)
+res <- fit_and_construct_posterior(
+        training_assessments,
+        training_set |> study_df_to_realizations(),
+        test_m_matrix,
+        "vine",
+        error_metric,
+        vine_fit_settings = list(),
+        error_estimation_settings = list(out_of_boundary="clamp"),
+        q_not_cross_zero = FALSE
+      )
+#plot_distributions(res$error_margins[], "pdf") 
+# estimate_margins(res$flattened_errors)[1] |> plot_distributions("pdf") 
+# #res$error_margins
+# estimate_margin_beta(res$flattened_errors[,1]) |> list() |> plot_distributions()
+
+corr_df <- correlation_df_from_flat_errors(res$flattened_errors)
+
+# adjust coloring so that 0 is black 
+line_placement <- 0.5 + purrr::map_dbl(seq_len(nr_experts-1), \(e) 3 * e)
+corr_df |> ggplot(aes(x=variable1, y=variable2, fill=correlation)) + geom_tile() + theme_minimal() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + scale_fill_gradient2(limits=c(-1,1),low = "red", mid = "white", high = "blue", midpoint = 0) + coord_fixed() +
+  geom_hline(yintercept=line_placement) + geom_vline(xintercept=line_placement)
+```
+
+```{r}
+res$error_margins |> purrr::keep(\(x) x$d==2)  |> 
+  plot_distributions("pdf")
+```
+
+```{r}
+q_marginals <- calculate_marginal_posteriors(res$error_margins, test_m_matrix, error_metric)
+# normalize posterior 
+q_marginals[] |>  purrr::keep(\(x) x$d==2) |>
+  plot_distributions("pdf")
+```
+
+
+```{r}
+get_cdf_vals <- \(q) {
+  purrr::map(q_marginals, \(q_mar) q_mar$cdf(q)) |> do.call(what=cbind)
+}
+get_cdf_vals(c(0.5, 0.9)) |> rvinecopulib::dvinecop(vinecop=res$error_copula)
+#get_cdf_vals(c(0.5, 0.9)) |> copula::dCopula(copula=copula::indepCopula(dim=30))
+y_copula <- get_cdf_vals(x+0.01) |> rvinecopulib::dvinecop(vinecop=res$error_copula) 
+plot(x, log(y_copula), type = "p", ylab = "density(q)")
+```
+```{r}
+# lets go along the diagonal in the space
+path <- seq(0, 1, length.out = 100)
+D <- ncol(res$flattened_errors)
+path_diagonal <- path |> purrr::map(\(x) rep(x,D)) |> do.call(what=rbind)
+y_vals <- path |> purrr::map_dbl(\(x) rvinecopulib::dvinecop(rep(x,D),vinecop=res$error_copula)) 
+plot(path, log(y_vals))
+```
+
+```{r}
+q_marginals |> purrr::keep(\(q) q$d == 2) |> plot_distributions("pdf")
+```
+
+```{r}
+# plot posterior
+x <- seq(res$posterior$support[1], res$posterior$support[2], length.out = 100)
+y_log <- res$posterior$logDM(x)
+y <- exp(y_log)
+plot(x, y_log, type = "l", ylab = "log density(q) + const")
+plot(x, y, type = "l", ylab = "density(q)")
+```
+```{r}
+plot_posterior <- function(post) {
+  support <- post$support
+  logDM <- post$logDM
+  x <- seq(support[1], support[2], length.out = 100)
+  y_log <- logDM(x)
+  y <- exp(y_log)
+  plot(x, y, type = "l", ylab = "const*density(q)")
+}
+log_posterior <- res$posterior$logDM
+support <- res$posterior$support
+```
+
+```{r}
+samples <- sample_log_unnormalized_density(log_posterior, support, 1000)
+samples <- armspp::arms(1000, res$posterior$logDM, res$posterior$support[1], res$posterior$support[2])
+```
+```{r}
+samples <- mcmc::metrop(res$posterior$logDM, (res$posterior$support[1]+res$posterior$support[2])/2, 1000, scale=0.01)
+samples$accept
+samples <- samples$batch
+plot(density(samples), xlim=c(res$posterior$support[1], res$posterior$support[2]))
+```
+
+```{r}
+norm_constant <- calc_normalization_constant_log_posterior(res$posterior$logDM, res$posterior$support, "uniform importance")
+posterior_fun <- \(q) exp(res$posterior$logDM(q))/norm_constant
+y_norm <- posterior_fun(x)
+plot(x, y_norm, type = "l", ylab = "density(q)")
+
+plot(density(sample_log_unnormalized_density(\(x) log(posterior_fun(x)), support, 1000)))
+```
+```{r}
+metropolis::metropolis.control()
+```
+
+```{r}
+bayesian_setup <- BayesianTools::createBayesianSetup(posterior_fun, lower=support[1], upper=support[2])
+testGenerator <- BayesianTools::createProposalGenerator(covariance = 1)
+
+bay_settings <- list(iterations=1000) # (support[1]+support[2])/2)
+                     #proposalGenerator=testGenerator)
+#bayesian_tools_samples <- BayesianTools::runMCMC(bayesian_setup, sampler="Metropolis", settings=bay_settings)
+bayesian_tools_samples <- BayesianTools::runMCMC(bayesian_setup, sampler="DEzs", settings=bay_settings)
+summary(bayesian_tools_samples)
+plot(bayesian_tools_samples)
+plot(density(bayesian_tools_samples$Z))
+```
+```{r}
 
 ```
 

@@ -48,7 +48,7 @@ test_distributions <- distributions[[target_question_id]]
 error_obs <- create_error_observations(training_set )
 copula <- find_copula(error_obs, copula_model = "frank")
 copula <- indepCopula(length(unique(training_set$expert_id)))
-DM_unnorm <- create_copula_posterior_unnormalized(copula, test_distributions)
+DM_unnorm <- create_copula_posterior_unnormalized_simple(copula, test_distributions)
 DM <- create_copula_posterior_numerical_integration(copula, test_distributions)
 DM_indep <- create_copula_posterior_numerical_integration(indepCopula(length(unique(training_set$expert_id))), test_distributions)
 plot_copula_posterior(DM)

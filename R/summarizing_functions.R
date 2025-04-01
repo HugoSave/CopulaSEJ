@@ -35,7 +35,7 @@ m_median <- function(assessments) {
   if (ncol(assessments) != 3) {
     stop("Assessments must have 3 columns")
   }
-  matrix(assessments[,2], ncol=1)
+  assessments[,2,drop=FALSE]
 }
 
 

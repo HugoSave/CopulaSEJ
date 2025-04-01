@@ -11,19 +11,12 @@ library(copula)
 library(scales)
 library(energy)
 library(knitr)
+library(CopulaSEJ)
 
+source("dev_utils.R")
 
-source("copula analysis.R")
-source("Functions/load_data.R")
-source("Functions/calibrationScore.R")
-source("Functions/CrossValidation.R")
-source("Functions/linear_distribution_estimation.R")
-source("Functions/create_copula_posterior.R")
-source("Functions/cubic_spline_distribution_estimation.R")
-source("Functions/summarizing_functions.R")
+data_list_form <- load_data_49()
 
-file_name <- "Output/formatted_data.rds"
-data_list_form <- readRDS(file_name)
 
 ```
 For every study we would want to calculate some error metric for each question. Then calculate the dCov between the error metric and the question. 
@@ -117,10 +110,36 @@ error_ratio <- function(m, q){
   return(m/q)
 }
 
+# complete_data_df <- data_list_form |> do.call(what=rbind) 
+
+get_error_CDF_fun <- function(m_matrix, k_percentiles=c(5,50,95), overshoot=0.1){
+  # fit distributions to m_matrix. m_matrix should be a matrix with E rows and D columns
+  E = nrow(m_matrix)
+  L = min(m_matrix)
+  U = max(m_matrix)
+  L_star = L - overshoot * (U - L)
+  U_star = U + overshoot * (U - L)
+  cdf_values <- c(0, k_percentiles/100, 1)
+  # extended_m_matrix <- abind::abind(matrix(L_star, nrow=E, ncol=1), m_matrix, matrix(U_star, nrow=E, ncol=1), along=2)
+  # distributions <- purrr::array_branch(extended_m_matrix, 1) |>
+  #   purrr::map(\(fractiles) {
+  #     linear_distribution_interpolation(fractiles, cdf_values)
+  #   })
+  
+  CDF_error <- function(m, q){
+    # m is a D length vector. q is a scalar. Returns a D length vector
+    dist <- linear_distribution_interpolation(c(L_star, m, U_star), cdf_values)
+    dist$cdf(q)
+  }
+  
+  return(CDF_error)
+}
+
 
 
 
 metrics = list(
+  list(m=m_three_quantiles, e=get_error_CDF_fun, name="3 quantiles and CDF error"),
   list(m=m_median, e=error_difference_2, name="median and q-m"),
   #list(m=m_median, e=error_relative, name="median and (q-m)/q"),
   #list(m=m_median, e=error_relative_m_denom, name="median and (q-m)/m"),
@@ -146,8 +165,13 @@ for (study_id in seq_along(data_list_form)) {
   
   nr_questions = length(unique(combined_data$question_id))
   
-  study_results = map(metrics, \(m_e) {
-    error_data = calculate_errors(combined_data, m_e$m, m_e$e)
+  study_results = purrr::map(metrics, \(m_e) {
+    if (m_e$name == "3 quantiles and CDF error") {
+      e_fun <- m_e$e(combined_data)
+      error_data = calculate_errors(combined_data, m_e$m, e_fun)
+    } else {
+      error_data = calculate_errors(combined_data, m_e$m, m_e$e)
+    }
     # check if inf
     if (!all(is.finite(error_data$error_flattened))) {
       return(list(dcor=NA, name=m_e$name, study_id=study_id, dcor_test=NA, dcor_T_test=NA))

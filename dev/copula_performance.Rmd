@@ -29,7 +29,7 @@ modified_studies <- list_mod[[2]]
 ```
 
 ```{r}
-data_list_short <- studies_no_m_zero[1:5]
+data_list_short <- studies_no_m_zero[1:3]
 params <- default_simulation_params(copula_model = "joe", prediction_method = "copula_calibration")
 params <- default_simulation_params(copula_model = "frank", prediction_method = "copula")
 params <- default_simulation_params(copula_model = "frank", prediction_method = "equal_weights")
@@ -38,25 +38,6 @@ analysis_res <- run_analysis_per_study(data_list_short, params)
 
 prediction_methods = c("copula_calibration", "copula_error_density", "equal_weights", "global_opt")
 params <- default_simulation_params(copula_model = "joe", prediction_method = "copula_assumption")
-error_metrics = list(get_ratio_error_metric(), get_linear_error_metric())
-summarizing_functions = list(get_three_quantiles_summarizing_function(), get_median_summarizing_function())
-
-results <- list()
-warnings <- list()
-for (error_metric in error_metrics) {
-  for (summarizing_function in summarizing_functions) {
-    print(paste("Analyzing error metric:", error_metric$name, ", and summarizing function:", summarizing_function$name))
-    
-    params <- default_simulation_params(copula_model = "vine", prediction_method = "copula_assumption", error_metric = error_metric, summarizing_function = summarizing_function)
-    
-    analysis_res <- run_analysis_per_study(data_list_short, params)
-    analysis_res$results["prediction_method"] <- glue::glue("copula_assumption:{error_metric$name}:{summarizing_function$name} summarizer")
-    results <- append(results, list(analysis_res$results))
-    warnings <- append(warnings, list(analysis_res$warnings))
-  }
-}
-# for all combinations of error metric ans summarizing functions
-
 
 # loop through studies in data_list_form
 for (prediction_method in prediction_methods) {
@@ -68,7 +49,8 @@ for (prediction_method in prediction_methods) {
 }
 results_df <- dplyr::bind_rows(results)
 
-saveRDS(results_df, "Output/performance_comparison_new.rds")
+#saveRDS(results_df, "dev/output/performance_comparison_new.rds")
+results_df<-readRDS("output/performance_comparison_new.rds")
 results_df <- readRDS("output/performance_comparison.rds")
 
 pos_values <- results_df |> filter(realization>0 & prediction>0) |> 
@@ -135,15 +117,15 @@ print(paste("Number of infinite relative errors: ", nr_0_realizations))
 
 
 
-results_df |> filter(realization != 0 & abs(rel_error) < 10 & study_id <= 20) |> #filter(!(prediction_method %in% c("copula"))) |>
+relative_erros_violins <- results_df |> filter(realization != 0 & abs(rel_error) < 10 & study_id <= 20) |> #filter(!(prediction_method %in% c("copula"))) |>
   ggplot(aes(prediction_method, rel_error)) +
   geom_violin() +
-  labs(title = "Relative Error by Study",
-       x = "Study ID",
+  labs(x = "method",
        y = "Relative Error") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
+ggsave("output/relative_erros_violins.png", relative_erros_violins, width=10)
+relative_erros_violins 
 ```
 ```{r}
 # some plot that per study shows the prediction of a specific method
@@ -165,7 +147,7 @@ nr_away_filtered_points <- results_df |> nrow() - nr_filtered_points
 min_points <- study_data |> filter(realization!=0 & abs(rel_error) < 50) |> group_by(study_id, prediction_method) |>
   summarise(n=n(), .groups="keep") |> pull(n) |> which.min()
 
-ggsave("Output/rel_error_per_plot.pdf", rel_error_per_plot, width = 10, height = 10)
+ggsave("output/rel_error_per_plot_generalization.pdf", rel_error_per_plot, width = 10, height = 10)
 rel_error_per_plot
 ```
 
@@ -216,7 +198,7 @@ distributions <- interpolate_distributions(test_set |> add_0_and_100_percentiles
 plot_distributions(distributions)
 
 copulaDM <- create_copula_posterior_numerical_integration(indepCopula(10), distributions)
-copula_fit_and_predict(training_set, test_set, "indep", "linear")
+copula_fit_and_predict_JC_assumption(training_set, test_set, "indep", "linear")
 equal_weight_predict(test_set)
 
 ```

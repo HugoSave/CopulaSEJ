@@ -1,0 +1,53 @@
+---
+title: "JC_assumption_compare_errors_and_summarizers"
+output: html_document
+---
+Compares different choices of $\epsilon(m, q)$ and $m(\cdot)$ under the JC assumption. 
+
+```{r setup}
+library(CopulaSEJ)
+source("dev_utils.R")
+
+file_name <- "output/data49_nov24.rds"
+studies <- readRDS(file_name)
+studies <- filter_studies_few_questions(studies, min_questions=10)
+studies <- filter_study_remove_ids(studies, study_ids=7) 
+
+percentile_names <- k_percentiles_to_colname(c(5, 50, 95))
+
+list_mod <- change_value_in_study_list(studies, percentile_names, 0, 0.0001)
+studies_no_m_zero <- list_mod[[1]]
+modified_studies <- list_mod[[2]]
+
+```
+
+
+```{r}
+data_list_short <- studies_no_m_zero[1:5]
+error_metrics = list(get_ratio_error_metric(), get_linear_error_metric())
+summarizing_functions = list(get_three_quantiles_summarizing_function(), get_median_summarizing_function())
+
+results <- list()
+warnings <- list()
+for (error_metric in error_metrics) {
+  for (summarizing_function in summarizing_functions) {
+    print(paste("Analyzing error metric:", error_metric$name, ", and summarizing function:", summarizing_function$name))
+    
+    params <- default_simulation_params(copula_model = "vine", prediction_method = "copula_assumption", error_metric = error_metric, summarizing_function = summarizing_function)
+    
+    analysis_res <- run_analysis_per_study(data_list_short, params)
+    analysis_res$results["prediction_method"] <- glue::glue("copula_assumption:{error_metric$name}:{summarizing_function$name} summarizer")
+    results <- append(results, list(analysis_res$results))
+    warnings <- append(warnings, list(analysis_res$warnings))
+  }
+}
+results_df <- dplyr::bind_rows(results)
+saveRDS(results_df, "output/JC_errors_and_summarizers_posteriors.rds")
+
+```
+
+```{r}
+results_df <- readRDS("output/JC_errors_and_summarizers_posteriors.rds")
+
+```
+

@@ -2,36 +2,61 @@
 % Please edit documentation in R/error_metric_class.R
 \name{new_error_metric}
 \alias{new_error_metric}
-\title{Constructor for error metric class}
+\title{Constructor for error metric class.}
 \usage{
 new_error_metric(
   name,
+  f_single,
   f,
+  f_single_prime_m,
   f_prime_m,
   f_prime_inverse_q,
+  f_single_increasing_q,
   f_increasing_q,
-  f_inverse_q = NULL
+  f_single_inverse_q,
+  f_inverse_q = NULL,
+  check_domain = NULL,
+  d = Inf
 )
 }
 \arguments{
 \item{name}{name of the function}
 
+\item{f_single, f_single_prime_m}{The error function,
+its derivative wrt m. Both functions have three
+arguments (m,q,d) where m and q are equal length vectors and d is a an
+integer specifying the kind of
+property m is. Value of d can thus change the error function used.}
+
 \item{f, f_prime_m}{The error metric and the derivative of f with respect to
 m. Both functions have two arguments (m,q) where m is a nxd matrix and
 q is a vector of length n. Returns a matrix of the same shape as m.}
 
-\item{f_increasing_q}{Function of a single argument (m). f_inverse_q is
-optional.
-Outputs a Boolean vector or matrix in the same shape as m. True if f is
-increasing in q, False if not, NA if not defined.}
+\item{f_single_increasing_q}{Function of (m, d) where m is a vector and d is
+a scalar}
+
+\item{f_increasing_q}{Function of a single argument (m) where m is a matrix
+with d columns.}
+
+\item{f_single_inverse_q}{function of (m,e,d) where m and e are vectors
+of same length and d is an integer. Outputs a vector of the same length as m.
+corresponding to the q values that would have generated the e vector.}
 
 \item{f_inverse_q, f_prime_inverse_q}{The inverse of f with respect to
 q and the derivative of the inverse respectively. Have two arguments (m,e)
-where m and e are vectors with length d and L. Outputs a matrix of size Lxd}
+where m and e are matrices both with size nxd. Outputs a matrix of nxd.}
+
+\item{check_domain}{function of (m, q) that checks if the error metric is
+well defined on the given values. The function returns a string if there is
+an error or TRUE if the values are OK. If this function is not provided, it
+defaults to function always returning TRUE.}
+
+\item{d}{The dimension of m this error metric is applicable to. Defaults to
+Inf which means it is applicable to any dimension.}
 }
 \value{
 A new error metric object
 }
 \description{
-Constructor for error metric class
+Constructor for error metric class.
 }

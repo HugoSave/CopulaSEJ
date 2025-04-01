@@ -21,7 +21,7 @@ split_dataframe_to_error_observations(
 \item{k_percentiles}{vector of percentiles}
 }
 \value{
-List of vectors
+n x (d*E) matrix
 }
 \description{
 Takes a data frame with the columns expert_id, question_id, and the k_percentiles

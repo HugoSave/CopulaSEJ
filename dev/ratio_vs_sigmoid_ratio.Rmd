@@ -1,0 +1,75 @@
+---
+title: "ratio_vs_sigmoid_ratio"
+output: html_document
+---
+
+```{r}
+#library(CopulaSEJ)
+devtools::load_all("../")
+source("dev_utils.R")
+studies <- load_data_49_filtered(relative_dev_folder = TRUE)
+k_percentiles <- c(5,50,95)
+summ_fun <- get_three_quantiles_summarizing_function()$f
+```
+# Example 1 : Sigmoid Ratio Error
+```{r}
+study <- filter_study_keep_ids(studies, 5)[[1]]
+test_question_id <- 1
+test_set <- study |> filter(question_id == test_question_id)
+training_set <- study |> filter(question_id != test_question_id)
+test_m_matrix <- test_set |> study_df_single_question_to_assessment_matrix(summ_fun, k_percentiles)
+training_assessments <- training_set |> study_df_to_assessment_array(summ_fun, k_percentiles)
+q_over_m_metric <- get_q_over_m_error_metric()
+error_3d <- assessment_array_to_errors(training_assessments, training_set |> study_df_to_realizations(), q_over_m_metric$f)
+error_metric <- get_sigmoid_relative_error_metric(k=0.4) # k =0.05
+```
+```{r}
+res <- fit_and_construct_posterior(
+        training_assessments,
+        training_set |> study_df_to_realizations(),
+        test_m_matrix,
+        "vine",
+        error_metric,
+        vine_fit_settings = list(),
+        error_estimation_settings = list(out_of_boundary="clamp"),
+        q_not_cross_zero = TRUE
+      )
+print(glue::glue("Desired support: {paste0(res$posterior$support, collapse=',')}"))
+
+expert_id <- 1
+error_margins <- res$error_margins |> purrr::map(\(x) {
+  x$d = switch(x$d, "1" = "M5", "2" = "M50", "3" = "M95"); 
+  x$expert_id = paste0("E", x$expert_id);
+  x })
+exp_error_margins <- error_margins |> purrr::keep(\(x) x$expert_id == paste0("E", expert_id))
+  
+exp_error_margins |> plot_supports()
+```
+```{r}
+res$errors[,expert_id,2, drop=FALSE] |> plot_3d_errors()
+```
+```{r}
+error_margins_exp <- res$error_margins |> purrr::keep(\(x) x$expert_id == expert_id && x$d==2) 
+error_margins_exp |> plot_distributions("pdf", overshoot = 0)
+```
+
+```{r}
+q_marginals <- calculate_marginal_posteriors(res$error_margins, test_m_matrix, error_metric)
+q_marginals_f <- combine_lists_of_functions_to_function(q_marginals)
+exp_q_margins <- q_marginals  |> purrr::keep(\(x) x$expert_id == expert_id)
+exp_q_margins[1:3] |> plot_distributions("pdf", fix_range=c(0.01, 1600))
+```
+```{r}
+q_marginals[1]
+```
+
+```{r}
+q_marginals_f$cdfs(100)
+q_marginals_f$cdfs(100) |>  rvinecopulib::dvinecop(res$error_copula)
+```
+
+```{r}
+y<-res$posterior$logDM(1:1500)
+plot(1:1500, y)
+```
+

@@ -21,9 +21,9 @@ studies <- readRDS(file_name)
 ```{r}
 nr_studies = length(studies)
 # nr of questions per study
-nr_questions = map_dbl(studies, \(study) length(unique(study$question_id))) 
-nr_experts = map_dbl(studies, \(study) length(unique(study$expert_id)))
-dimensions_for_three_quantiles = nr_experts * 3
+studies_nr_questions = map_dbl(studies, \(study) length(unique(study$question_id))) 
+studies_nr_experts = map_dbl(studies, \(study) length(unique(study$expert_id)))
+dimensions_for_three_quantiles = studies_nr_experts * 3
 ```
 
 ```{r}
