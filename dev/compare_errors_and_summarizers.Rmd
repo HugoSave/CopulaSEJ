@@ -17,7 +17,7 @@ list_mod <- change_value_in_study_list(studies, k_percentiles_to_colname(c(5, 50
 
 ```{r}
 data_list_short <- list_mod[1]
-error_metrics = list(get_ratio_error_metric(), get_linear_error_metric())
+error_metrics = list(cdf_independence_cond_m, get_ratio_error_metric(), get_linear_error_metric())
 summarizing_functions = list(get_three_quantiles_summarizing_function(), get_median_summarizing_function())
 results <- list()
 warnings <- list()

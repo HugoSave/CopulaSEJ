@@ -118,11 +118,9 @@ get_error_CDF_fun <- function(m_matrix, k_percentiles=c(5,50,95), overshoot=0.1)
   return(CDF_error)
 }
 
-
-
 run_error_dependence_simulation <- function(studies=NULL, metrics=NULL, output_file="output/dcors_df.rds") {
   if (is.null(studies)) {
-    studies <- load_data_49()[1:2]
+    studies <- load_data_49()
   }
   if (is.null(metrics)) {
     metrics = list(
