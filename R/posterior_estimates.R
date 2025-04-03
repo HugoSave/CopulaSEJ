@@ -35,7 +35,7 @@ sample_log_unnormalized_density <- function(log_density, support, num_samples, s
   }  else if (method=="BayesianTools") {
     bayesian_setup <- BayesianTools::createBayesianSetup(log_density, lower=support[1], upper=support[2])
 
-    bay_settings <- list(iterations=num_samples, startValue=matrix(0.2, nrow=2, ncol=1)) # (support[1]+support[2])/2)
+    bay_settings <- list(iterations=num_samples) #, startValue=matrix(0.2, nrow=2, ncol=1)) # (support[1]+support[2])/2)
     bayesian_tools_samples <- BayesianTools::runMCMC(bayesian_setup, sampler="DEzs", settings=bay_settings)
     bayesian_tools_samples$Z
   }

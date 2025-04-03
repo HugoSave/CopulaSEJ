@@ -77,7 +77,7 @@ calc_cdf_values_JC <- function(expert_distributions, q_vec, is_increasing_flat, 
   # is now a nxE data.frame
 
   # duplicates each expert's cdf values d times.
-  cdf_values <- cdf_values[,rep(seq_len(E), each=d)] # nx(d*E) matrix
+  cdf_values <- cdf_values[,rep(seq_len(E), each=d), drop=FALSE] # nx(d*E) matrix
   return(flip_cdf_values_if_decreasing(cdf_values, is_increasing_flat))
 }
 
@@ -177,6 +177,61 @@ create_log_unnormalized_posterior_JC <- function(error_copula, expert_distributi
   return(list(logDM=logDM, support=support))
 }
 
+create_log_unnormalized_posterior_indep <- function(indep_copula, indep_margins, indep_class, m_matrix, support=NULL) {
+  checkmate::assert_matrix(m_matrix, "numeric", any.missing = FALSE)
+  E = nrow(m_matrix)
+  checkmate::assert(
+    checkmate::check_class(indep_copula, "vinecop_dist"),
+    checkmate::check_class(indep_copula, "Copula")
+  )
+  nr_dims <- dim(indep_copula)[[1]]
+  checkmate::assert_list(indep_margins, len=nr_dims)
+
+  indep_fix_m <- indep_class$f_freeze_m(m_matrix)
+
+  is_increasing_flat <- indep_fix_m$f_increasing() |> flatten_matrix_row_by_row()
+  #is_increasing_flat <- calc_is_increasing_flat(indep_copula, m)
+
+  stopifnot(!is.null(support))
+  # TODO fix support. Have to implement inverse of the indep_class function.
+  #support <- indep_margins |> purrr::map(\(x) x$support) |> error_supports_to_q_supports(m, error_metric) |> support_intersection(nested_list=FALSE)
+  #support <- calc_support_error_marginals(error_margins, error_metric, m) |> support_intersection(nested_list=FALSE)
+
+
+  logDM <- function(q_input) {
+    ret_density <- vector("double", length=length(q_input))
+    out_of_support <- q_input <= support[1] | q_input >= support[2]
+    ret_density[out_of_support] <- -Inf
+
+    q_vec <-q_input[!out_of_support]
+    if (length(q_vec) == 0) {
+      return(ret_density)
+    }
+
+    n = length(q_vec)
+    indep_values <- indep_fix_m$f(q_vec) # nxExD array
+     #error_to_3d_array(error_metric$f, m, q_vec) |> # nxExd array
+    pdf_cdf_vals <- calc_pdf_and_cdf_values_flat(indep_values, indep_margins)
+
+    pdf_values <- pdf_cdf_vals$pdf_values
+    cdf_values <- flip_cdf_values_if_decreasing(pdf_cdf_vals$cdf_values, is_increasing_flat)
+
+    if (is(indep_copula, "vinecop_dist")) {
+      copula_density_values <- rvinecopulib::dvinecop(cdf_values, indep_copula, cores=1)
+    } else {
+      copula_density_values <- copula::dCopula(cdf_values, indep_copula)
+    }
+    added_log_pdf_values <- rowSums(log(pdf_values))
+
+    added_log_e_prime_m <- indep_fix_m$f_prime_q(q_vec) |> abs() |> log() |> rowSums()
+
+    #added_log_e_prime_m <- calc_sum_log_e_prime_m(error_metric, m, q_vec)
+    ret_density[!out_of_support] <- log(copula_density_values) + added_log_pdf_values + added_log_e_prime_m
+    ret_density
+  }
+  return(list(logDM=logDM, support=support))
+}
+
 #' Title
 #'
 #' @param error_copula Already fitted error copula
@@ -188,7 +243,7 @@ create_log_unnormalized_posterior_JC <- function(error_copula, expert_distributi
 #' @export
 #'
 #' @examples
-create_log_unnormalized_posterior <- function(error_copula, error_margins, error_metric, m) {
+create_log_unnormalized_posterior <- function(error_copula, error_margins, error_metric, m, support=NULL) {
   checkmate::assert_matrix(m, "numeric", any.missing = FALSE)
   d = ncol(m)
   E = nrow(m)
@@ -200,8 +255,10 @@ create_log_unnormalized_posterior <- function(error_copula, error_margins, error
   checkmate::assert_set_equal(dim(error_copula)[[1]], d*E)
   is_increasing_flat <- calc_is_increasing_flat(error_metric, m)
 
-  support <- error_margins |> purrr::map(\(x) x$support) |> error_supports_to_q_supports(m, error_metric) |> support_intersection(nested_list=FALSE)
-  #support <- calc_support_error_marginals(error_margins, error_metric, m) |> support_intersection(nested_list=FALSE)
+
+  if (is.null(support)) {
+    support <- error_margins |> purrr::map(\(x) x$support) |> error_supports_to_q_supports(m, error_metric) |> support_intersection(nested_list=FALSE)
+  }
 
   logDM <- function(q_input) {
     ret_density <- vector("double", length=length(q_input))

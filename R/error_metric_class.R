@@ -81,6 +81,25 @@ new_error_metric <- function(name,
   ))
 }
 
+new_independence_function <- function(name, f, f_prime_q, f_is_increasing, get_f_fix_m=NULL) {
+  checkmate::assert_string(name)
+  checkmate::assert_function(f)
+  checkmate::assert_function(f_prime_q)
+  checkmate::assert_function(f_is_increasing)
+  checkmate::assert_function(get_f_fix_m, null.ok = TRUE)
+
+  return(structure(
+    list(
+      name = name,
+      f = f,
+      f_prime_q = f_prime_q,
+      f_is_increasing=f_is_increasing,
+      f_freeze_m = get_f_fix_m
+    ),
+    class = "independence_function"
+  ))
+}
+
 validate_error_metric_on_observations <- function(error_metric, m_training, q_training, m_test) {
 
   is_inc <- error_metric$f_increasing_q(m_training)
@@ -539,6 +558,97 @@ get_relative_error_metric <- function() {
   )
 }
 
+not_yet_implemented <- function(...) {
+  stop("Not yet implemented")
+}
+
+##### CDF error
+indep_CDF <- function(q_values, m_matrix, overshoot=0.1, k_percentiles=c(5,50,95)){
+  # fit distributions to m_matrix. m_matrix should be a matrix with E rows and D columns
+  ind_cond_m <- get_cdf_indep_function_fix_m(m_matrix, overshoot, k_percentiles)
+  ind_cond_m$f(q_values)
+}
+
+indep_CDF_prime_q <- function(q_values, m_matrix, overshoot=0.1, k_percentiles=c(5,50,95)){
+  # fit distributions to m_matrix. m_matrix should be a matrix with E rows and D columns
+  ind_cond_m <- get_cdf_indep_function_fix_m(m_matrix, overshoot, k_percentiles)
+  ind_cond_m$f_prime_q(q_values)
+}
+
+indep_CDF_is_increasing <- function(m_matrix, overshoot=0.1, k_percentiles=c(5,50,95)){
+  # fit distributions to m_matrix. m_matrix should be a matrix with E rows and D columns
+  ind_cond_m <- get_cdf_indep_function_fix_m(m_matrix, overshoot, k_percentiles)
+  ind_cond_m$f_increasing()
+}
+
+get_CDF_indep_class <- function() {
+  return(
+    new_independence_function(
+      name="independence CDF",
+      f=indep_CDF,
+      f_prime_q=indep_CDF_prime_q,
+      f_is_increasing=indep_CDF_is_increasing,
+      get_f_fix_m = get_cdf_indep_function_fix_m
+    )
+  )
+}
+
+#' Title
+#'
+#' @param m A matrix ExD
+#' @param overshoot A scalar
+#' @param k_percentiles A vector of percentiles
+#'
+#' @returns
+#' @export
+#'
+#' @examples
+get_cdf_indep_function_fix_m <- function(m_matrix, overshoot=0.1, k_percentiles = c(5,50,95)) {
+  m_matrix <- typecheck_and_convert_matrix_vector(m_matrix, vector())
+  N = nrow(m_matrix)
+  is_increasing_matrix <- matrix(TRUE, nrow=N, ncol=1) # single CDF value per expert
+  L = min(m_matrix)
+  U = max(m_matrix)
+  L_star = L - overshoot * (U - L)
+  U_star = U + overshoot * (U - L)
+  cdf_values <- c(0, k_percentiles/100, 1)
+  extended_m_matrix <- abind::abind(matrix(L_star, nrow=N, ncol=1), m_matrix, matrix(U_star, nrow=N, ncol=1), along=2)
+  distributions <- purrr::array_branch(extended_m_matrix, 1) |>
+    purrr::map(\(fractiles) {
+      linear_distribution_interpolation(fractiles, cdf_values)
+    })
+
+  f_fix_m <- function(q) {
+    values <- distributions |> purrr::map(\(p) {
+      p$cdf(q)
+    }) |> do.call(what = cbind)
+    dim(values) <- c(nrow(values), ncol(values), 1)
+    values
+  }
+
+
+  f_prime_q_fix_m <- function(q) {
+    values <- distributions |> purrr::map(\(p) {
+      p$pdf(q)
+    }) |> do.call(what = cbind)
+    # add a dimension 1 to values
+    dim(values) <- c(nrow(values), ncol(values), 1)
+    values
+
+  }
+
+  f_increasing <- function() {
+    return(is_increasing_matrix)
+  }
+
+  list(
+    f=f_fix_m,
+    f_prime_q=f_prime_q_fix_m,
+    f_increasing = f_increasing
+  )
+}
+
+
 ###### Sigmoid functions to compose above error functions with
 
 sigmoid_centered_image <- function(x, L, x_0, k) {
@@ -568,6 +678,19 @@ get_sigmoid_q_over_m_error_metric <- function(k=1) {
                              sigmoid_inverse = purrr::partial(sigmoid_centered_image_inverse, L=L, x_0=x_0, k=k),
                              sigmoid_inverse_prime = purrr::partial(sigmoid_centered_image_inverse_prime, L=L, x_0=x_0, k=k)
   )
+}
+
+get_sigmoid_linear_error_metric <- function(k=0.05) {
+  error_metric <- get_linear_error_metric()
+  L=2
+  x_0 = 0
+  compose_sigmoid_with_error(error_metric,
+                             sigmoid=purrr::partial(sigmoid_centered_image, L=L, x_0=x_0, k=k),
+                             sigmoid_prime=purrr::partial(sigmoid_centered_prime, L=L, x_0=x_0, k=k),
+                             sigmoid_inverse = purrr::partial(sigmoid_centered_image_inverse, L=L, x_0=x_0, k=k),
+                             sigmoid_inverse_prime = purrr::partial(sigmoid_centered_image_inverse_prime, L=L, x_0=x_0, k=k)
+  )
+
 }
 
 get_sigmoid_relative_error_metric <- function(k=0.05) {
@@ -646,6 +769,8 @@ compose_sigmoid_with_error <- function(error_metric, sigmoid, sigmoid_prime, sig
                    )
 
 }
+
+
 
 
 ##### Error uitls

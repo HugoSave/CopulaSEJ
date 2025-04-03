@@ -56,6 +56,18 @@ change_value_in_study_list <- function(study_list,
   list(study_list=study_list, study_modified=study_modified)
 }
 
+filter_questions_in_studies_non_negative <- function(study_list) {
+  study_list |>
+    purrr::map(\(study) {
+      study |> split.data.frame(study$question_id) |> purrr::keep(
+        \(question_df) {
+          min(question_df) >= 0
+        }) |> purrr::list_rbind()
+    }) |>
+    purrr::keep(\(study) nrow(study) > 0)
+}
+
+
 filter_studies_few_questions <- function(study_list, min_questions=10) {
   study_list |>
     purrr::keep(\(study) length(unique(study$question_id)) >= min_questions)

@@ -11,18 +11,21 @@ file_name <- "output/data49_nov24.rds"
 studies <- readRDS(file_name)
 studies <- filter_studies_few_questions(studies, min_questions=11)
 studies <- filter_study_remove_ids(studies, study_ids=7) 
-list_mod <- change_value_in_study_list(studies, k_percentiles_to_colname(c(5, 50, 95)), 0, 0.0001)$study_list
+list_mod <- change_value_in_study_list(studies, k_percentiles_to_colname(c(5, 50, 95)), 0, 0.001)$study_list
 ```
 
 
 ```{r}
-data_list_short <- list_mod[1]
-error_metrics = list(cdf_independence_cond_m, get_ratio_error_metric(), get_linear_error_metric())
+data_list_short <- list_mod
+error_metrics = list(get_CDF_indep_class(), get_ratio_error_metric(), get_linear_error_metric())
 summarizing_functions = list(get_three_quantiles_summarizing_function(), get_median_summarizing_function())
 results <- list()
 warnings <- list()
 for (error_metric in error_metrics) {
   for (summarizing_function in summarizing_functions) {
+    if (error_metric$name == get_CDF_indep_class()$name && summarizing_function$name == get_median_summarizing_function()$name) {
+      next
+    }
     print(paste("Analyzing error metric:", error_metric$name, ", and summarizing function:", summarizing_function$name))
     
     params <- default_simulation_params(copula_model = "vine", prediction_method = "copula", error_metric = error_metric, summarizing_function = summarizing_function)
@@ -38,11 +41,34 @@ results_df <- dplyr::bind_rows(results)
 
 ```
 
+```{r}
+x = seq(70, 130, length.out=100)
+y <- results_df$posterior[[1]]$logDM(x)
+```
+
 
 ```{r}
 # create a function that creates a prediction from a posterior function
 
-preds <- results_df$posterior |> purrr::map_dbl(\(post) mean(sample_log_unnormalized_density(post$logDM, post$support, 1000)), .progress = TRUE)
+preds <- results_df$posterior |> purrr::map_dbl(\(post) mean(sample_log_unnormalized_density(post$logDM, post$support, 500)), .progress = TRUE)
+results_df$prediction = preds
+```
+```{r}
+results_df |> ggplot2::ggplot(aes(x = prediction, y = realization)) +
+  geom_point() +
+  facet_wrap(~ prediction_method) +
+  labs(title = "Prediction vs Error", x = "Prediction", y = "Error") +
+  theme_minimal()
+```
+
+```{r}
+results_df$error = results_df$realization - results_df$prediction
+results_df$rel_error = results_df$error / results_df$realization
+
+results_df |> dplyr::group_by(prediction_method) |>
+  dplyr::summarise(mean_error = mean(abs(error)), mean_rel_error = mean(abs(rel_error)), sd_rel_error = sd(rel_error)) |>
+  dplyr::arrange(mean_rel_error) |>
+  knitr::kable()
 ```
 
 

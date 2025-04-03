@@ -561,12 +561,19 @@ target_q_support_from_test_assessments <- function(m_test_matrix) {
 }
 
 target_q_support_to_error_supports <- function(target_q_support, m_test_matrix, error_metric) {
-  # Calculate the error support from the target q support
-  purrr::array_tree(m_test_matrix, margin=c(1,2)) |> purrr::map(\(m_row) {
-    purrr::imap(m_row, \(m_observed, d_i) {
-      q_support_to_error_support(target_q_support, m_observed, d_i, error_metric)
-    })
-  }) |> purrr::list_flatten()
+    # Calculate the error support from the target q support
+    purrr::array_tree(m_test_matrix, margin=c(1,2)) |> purrr::map(\(m_row) {
+        purrr::imap(m_row, \(m_observed, d_i) {
+            q_support_to_error_support(target_q_support, m_observed, d_i, error_metric)
+          })
+      }) |> purrr::list_flatten()
+}
+
+target_q_support_to_independence_supports <- function(target_q_support, m_test_matrix, indep_metric) {
+  i_values <- indep_metric$f(target_q_support, m_test_matrix) # 2xExD array
+  purrr::array_branch(i_values, c(2,3)) |> purrr::map(\(i_values) {
+    c(min(i_values), max(i_values))
+  })
 }
 
 widen_support <- function(support, overshoot, not_cross_zero=TRUE) {
@@ -584,6 +591,81 @@ widen_support <- function(support, overshoot, not_cross_zero=TRUE) {
     }
   }
   new_support
+}
+
+fit_and_construct_posterior_indep <- function(training_estimates, training_realizations,
+                                           test_matrix,
+                                           copula_model = "joe",
+                                           indep_class = NULL,
+                                           vine_fit_settings = list(),
+                                           error_estimation_settings=list(),
+                                           q_not_cross_zero=TRUE) {
+  if (is.null(indep_class)) {
+    indep_class <- get_ratio_error_metric()
+  }
+  checkmate::assert_array(training_estimates, "numeric", d=3)
+  checkmate::assert_numeric(training_realizations)
+  checkmate::assert_matrix(test_matrix, "numeric")
+  checkmate::assert_class(indep_class, "independence_function")
+  checkmate::assert_string(copula_model)
+  checkmate::assert_list(vine_fit_settings)
+  checkmate::assert_list(error_estimation_settings)
+
+  # TODO implement a domain check prior?
+  # domain_check <- indep_class$check_domain(abind::abind(training_estimates,
+  #                                                        test_matrix, along=1), training_realizations)
+  #checkmate::makeAssertion(NULL, domain_check, var.name="m and q values", collection = NULL)
+
+  E = nrow(test_matrix)
+  D = ncol(test_matrix)
+  training_dim <- dim(training_estimates)
+  checkmate::assert_set_equal(training_dim, c(length(training_realizations), E, D), ordered=TRUE)
+  n <- training_dim[1]
+  res <- checkmate::check_number(n, lower=10)
+  if (is.character(res)) {
+    checkmate::makeAssertion(n, "Number of training samples must be at least 10. This comes from a hard coded limit in the rvinecopula (and vineCopula) package.",
+                             "dim(training_estimates)[1]",
+                             NULL)
+  }
+
+  warning=NULL
+
+  if (E == 1) {
+    warining=c("ONE_EXPERT")
+  }
+
+
+  errors <- assessment_array_to_indep_obs(training_estimates, training_realizations, indep_class$f)
+  flattened_errors <- flatten_3d_array_to_matrix(errors)
+
+  target_q_support <- target_q_support_from_test_assessments(test_matrix)
+
+  #errors_min_max <- get_error_margins_min_max(flattened_errors) # per dimension
+  #target_q_support <- find_target_q_support(errors_min_max, test_matrix, indep_class)
+
+  target_q_support <- widen_support(target_q_support, 0.1, not_cross_zero = q_not_cross_zero)
+
+  target_indep_supports <- target_q_support_to_independence_supports(target_q_support, test_matrix, indep_class)
+
+  # inject here allows us to pass the arg=value pairs of the list as arguments
+  margin_distributions <- rlang::inject(estimate_margins(flattened_errors, target_indep_supports, !!!error_estimation_settings))
+  margin_distributions <- add_d_e_to_list(margin_distributions, D)
+
+  error_copula <- rlang::inject(fit_copula(flattened_errors, copula_model, !!!vine_fit_settings))
+
+  posterior<-create_log_unnormalized_posterior_indep(error_copula,
+                                               margin_distributions,
+                                               indep_class,
+                                               test_matrix,
+                                               support=target_q_support)
+  list(
+    posterior = posterior,
+    warning = warning,
+    flattened_errors=flattened_errors,
+    errors=errors,
+    error_copula=error_copula,
+    error_margins=margin_distributions
+  )
 }
 
 
@@ -665,7 +747,8 @@ fit_and_construct_posterior <- function(training_estimates, training_realization
   posterior<-create_log_unnormalized_posterior(error_copula,
                                     margin_distributions,
                                     error_metric,
-                                    test_matrix)
+                                    test_matrix,
+                                    support=target_q_support)
   list(
     posterior = posterior,
     warning = warning,
@@ -865,14 +948,28 @@ study_test_performance <- function(study_data, sim_params = NULL) {
     posterior = NULL
     prediction = NA
     if (p$prediction_method == "copula") {
-      res <- fit_and_construct_posterior(
-        training_set |> study_df_to_assessment_array(p$summarizing_function$f, p$k_percentiles),
-        training_set |> study_df_to_realizations(),
-        test_set |> study_df_single_question_to_assessment_matrix(p$summarizing_function$f, p$k_percentiles),
-        p$copula_model,
-        p$error_metric,
-        vine_fit_settings = p$vine_fit_settings
-      )
+      training_estimates <-  training_set |> study_df_to_assessment_array(p$summarizing_function$f, p$k_percentiles)
+      training_realizaitons <- training_set |> study_df_to_realizations()
+      test_matrix <- test_set |> study_df_single_question_to_assessment_matrix(p$summarizing_function$f, p$k_percentiles)
+      if (is(p$error_metric, "independence_function")) {
+        res <- fit_and_construct_posterior_indep(
+          training_estimates,
+          training_realizaitons,
+          test_matrix,
+          p$copula_model,
+          p$error_metric,
+          vine_fit_settings = p$vine_fit_settings
+        )
+      } else {
+        res <- fit_and_construct_posterior(
+          training_estimates,
+          training_realizaitons,
+          test_matrix,
+          p$copula_model,
+          p$error_metric,
+          vine_fit_settings = p$vine_fit_settings
+        )
+      }
       posterior <- res$posterior
       warnings <- append(warnings, res$warning)
     } else if (p$prediction_method == "copula_assumption") {
@@ -1023,7 +1120,7 @@ plot_3d_errors <- function(errors) {
 }
 
 ## make function to plot list of distributions
-plot_distributions <- function(distributions, which_plots = "pdf&cdf", not_cross_zero=FALSE, D=NULL, overshoot=0.1, fix_range=NULL) {
+plot_distributions <- function(distributions, which_plots = "pdf&cdf", not_cross_zero=FALSE, D=NULL, overshoot=0.1, fix_range=NULL, pdf_element_name="pdf", cdf_element_name="cdf") {
   df <- tibble::tibble(
     x_data = numeric(),
     y_cdf = numeric(),
@@ -1039,8 +1136,8 @@ plot_distributions <- function(distributions, which_plots = "pdf&cdf", not_cross
       new_support <- fix_range
     }
     x_data <- seq(new_support[1], new_support[2], length.out = 1000)
-    y_cdf <- distributions[[i]]$cdf(x_data)
-    y_pdf <- distributions[[i]]$pdf(x_data)
+    y_cdf <- distributions[[i]][[cdf_element_name]](x_data)
+    y_pdf <- distributions[[i]][[pdf_element_name]](x_data)
     row <- i
     expert <- NA
     d <- NA

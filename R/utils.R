@@ -115,6 +115,38 @@ flatten_3d_array_to_matrix <- function(arr) {
   mat
 }
 
+assessment_array_to_indep_obs <- function(assessments, realizations, indep_fun) {
+  checkmate::assert_array(assessments, d=3)
+  checkmate::assert_numeric(realizations)
+  checkmate::assert_function(indep_fun)
+  N = dim(assessments)[1]
+  E = dim(assessments)[2]
+  D = dim(assessments)[3]
+  checkmate::assert_set_equal(N, length(realizations))
+
+  over_Q_estimates <- purrr::array_branch(assessments, 1) # list with Exd matrices
+
+  errors <- purrr::map2(over_Q_estimates, realizations, \(estimates, realization) {
+    error_values <- indep_fun(realization, estimates) # an 1xExd matrix
+  }) |> abind::abind(along=1) # NxExd
+
+  #errors <- errors |> aperm(c(3,1,2)) # NxExD
+
+  assessment_dimnames <- dimnames(assessments)
+  dimnames(errors)[1:2] <- assessment_dimnames[1:2]
+  if (is.null(assessment_dimnames) || is.null(assessment_dimnames[[1]])) {
+    dimnames(errors)[[1]] <- paste0("Q", 1:N)
+  }
+  if (is.null(assessment_dimnames) || is.null(assessment_dimnames[[2]])) {
+    dimnames(errors)[[2]] <- paste0("E", 1:E)
+  }
+  if (is.null(assessment_dimnames) || is.null(assessment_dimnames[[3]])) {
+    dimnames(errors)[[3]] <- paste0("D", 1:D)
+  }
+
+  errors
+}
+
 assessment_array_to_errors <- function(assessments, realizations, error_fun) {
   checkmate::assert_array(assessments, d=3)
   checkmate::assert_numeric(realizations)
