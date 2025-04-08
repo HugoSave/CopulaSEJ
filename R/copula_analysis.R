@@ -275,6 +275,7 @@ single_expert_predict <- function(test_set, expert_id) {
   prediction
 }
 
+
 #' Calculates the unnormalized posteriors of $Q$ when conditioning on a single
 #' $M_i^e$ random variable and assuming a flat prior.
 #'
@@ -483,7 +484,7 @@ estimate_margin_kde <- function(obs, support) {
 #' @export
 #'
 #' @examples
-estimate_margins <- function(observations, supports=NULL, method="beta", overshoot=0.1, out_of_boundary="clamp") {
+estimate_margins <- function(observations, supports=NULL, method="beta", overshoot=0.1, out_of_boundary="clamp", bw="SJ") {
   checkmate::assert_matrix(observations, "numeric")
   checkmate::assert_list(supports, null.ok=TRUE, len = ncol(observations), any.missing = FALSE, types = c("numeric"))
 
@@ -503,9 +504,9 @@ estimate_margins <- function(observations, supports=NULL, method="beta", oversho
     if (method =="kde") {
 
       if (!is.null(supports[[i]])) {
-        kde <- stats::density.default(obs, bw = "SJ", kernel="gaussian", from=supports[[i]][1], to=supports[[i]][2])
+        kde <- stats::density.default(obs, bw = bw, kernel="gaussian", from=supports[[i]][1], to=supports[[i]][2])
       } else {
-        kde <- stats::density.default(obs, bw = "SJ", kernel="gaussian")
+        kde <- stats::density.default(obs, bw = bw, kernel="gaussian")
       }
 
       x <- kde$x
@@ -606,7 +607,7 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
   checkmate::assert_array(training_estimates, "numeric", d=3)
   checkmate::assert_numeric(training_realizations)
   checkmate::assert_matrix(test_matrix, "numeric")
-  checkmate::assert_class(indep_class, "independence_function")
+  checkmate::assert_class(indep_class, "decoupler")
   checkmate::assert_string(copula_model)
   checkmate::assert_list(vine_fit_settings)
   checkmate::assert_list(error_estimation_settings)
@@ -634,8 +635,8 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
     warining=c("ONE_EXPERT")
   }
 
-
   errors <- assessment_array_to_indep_obs(training_estimates, training_realizations, indep_class$f)
+  D_tilde = dim(errors)[3]
   flattened_errors <- flatten_3d_array_to_matrix(errors)
 
   target_q_support <- target_q_support_from_test_assessments(test_matrix)
@@ -649,7 +650,7 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
 
   # inject here allows us to pass the arg=value pairs of the list as arguments
   margin_distributions <- rlang::inject(estimate_margins(flattened_errors, target_indep_supports, !!!error_estimation_settings))
-  margin_distributions <- add_d_e_to_list(margin_distributions, D)
+  margin_distributions <- add_d_e_to_list(margin_distributions, D_tilde)
 
   error_copula <- rlang::inject(fit_copula(flattened_errors, copula_model, !!!vine_fit_settings))
 
@@ -757,6 +758,52 @@ fit_and_construct_posterior <- function(training_estimates, training_realization
     error_copula=error_copula,
     error_margins=margin_distributions
   )
+}
+
+decoupler_support_to_q_support <- function(decouple_support, m, e, d, decoupler) {
+  # Calculate the q support from the error support
+  q_support <- decoupler$f_inverse(decouple_support, m, e, d)
+  if (!decoupler$f_increasing(m)[d,e]) {
+    q_support <- c(q_support[2], q_support[1])
+  }
+  q_support
+}
+
+construct_posterior_margins <- function(margin_distributions, decoupler, m_matrix) {
+  decoupler <- decoupler$freeze_m(m_matrix)
+
+  force(decoupler)
+  single_output_f <- function(q, e, d) {
+      decoupler$f(q)[e,d]
+  }
+
+  single_output_f_prime <- function(q, e, d) {
+    decoupler$f_prime(q)[e,d]
+  }
+
+  is_increasing <- decoupler$is_increasing()
+
+  margin_distributions |> purrr::map(
+    \(dist) {
+      e = dist$expert_id
+      d = dist$d
+      # create a new distribution with the decoupling function
+      pdf <- function(q) {
+        pdf_val <- dist$pdf(single_output_f(q, e, d))
+        pdf_val * abs(single_output_f_prime(q, e, d))
+      }
+      cdf <- function(q) {
+        cdf_val <- dist$cdf(single_output_f(q, e, d))
+        cdf_val <- if (is_increasing[e, d]) cdf_val else 1 - cdf_val
+        cdf_val
+      }
+      support <- decoupler_support_to_q_support(dist$support, m_matrix, e, d, decoupler)
+      list(pdf = pdf,
+           cdf = cdf,
+           support = support)
+    }
+  )
+
 }
 
 
@@ -951,14 +998,15 @@ study_test_performance <- function(study_data, sim_params = NULL) {
       training_estimates <-  training_set |> study_df_to_assessment_array(p$summarizing_function$f, p$k_percentiles)
       training_realizaitons <- training_set |> study_df_to_realizations()
       test_matrix <- test_set |> study_df_single_question_to_assessment_matrix(p$summarizing_function$f, p$k_percentiles)
-      if (is(p$error_metric, "independence_function")) {
+      if (is(p$error_metric, "decoupler")) {
         res <- fit_and_construct_posterior_indep(
           training_estimates,
           training_realizaitons,
           test_matrix,
           p$copula_model,
           p$error_metric,
-          vine_fit_settings = p$vine_fit_settings
+          vine_fit_settings = p$vine_fit_settings,
+          error_estimation_settings = p$error_estimation_settings
         )
       } else {
         res <- fit_and_construct_posterior(
@@ -1084,8 +1132,9 @@ plot_add_supports <- function(p, list_supports) {
   support_df$d <- factor(support_df$d, support_df$d |> unique())
   support_df$expert_id <- factor(support_df$expert_id, support_df$expert_id |> unique())
 
-  p + ggplot2::geom_text(data=support_df, aes(x=left_support, y=as.factor(expert_id), label="[", color=d)) +
-    ggplot2::geom_text(data=support_df, aes(x=right_support, y=as.factor(expert_id), label="]", color=d))
+  p + ggplot2::geom_text(data=support_df, aes(x=left_support, y=as.factor(expert_id), label="[", color=d, group="Support")) +
+    ggplot2::geom_text(data=support_df, aes(x=right_support, y=as.factor(expert_id), label="]", color=d, group="Support")) +
+    ggplot2::labs(group="al")
 }
 
 
@@ -1098,9 +1147,13 @@ plot_add_supports <- function(p, list_supports) {
 #'
 #' @examples
 plot_3d_errors <- function(errors) {
+  dims <- dim(errors)
   q_names <- dimnames(errors)[[1]]
+  q_names <- if (is.null(q_names)) seq(dims[1]) else q_names
   e_names <- dimnames(errors)[[2]]
+  e_names <- if (is.null(e_names)) seq(dims[2]) else e_names
   d_names <- dimnames(errors)[[3]]
+  d_names <- if (is.null(d_names)) seq(dims[3]) else d_names
   errors_flat <- aperm(errors, c(3,2,1)) |> as.vector()
   #errors_flat <- as.vector(errors)
   df <- tibble::tibble(
@@ -1113,9 +1166,9 @@ plot_3d_errors <- function(errors) {
   df$e <- factor(df$e, levels = e_names)
   df$d <- factor(df$d, levels = d_names)
 
-  print(glue::glue("Plotting for questions {paste0(q_names, collapse=', ')}"))
+  #print(glue::glue("Plotting for questions {paste0(q_names, collapse=', ')}"))
   p<-df |> ggplot2::ggplot(ggplot2::aes(x=error, y=e, color=d)) +
-    ggplot2::geom_point(alpha=0.9) + ggplot2::labs(x="Error", y="Expert ID")
+    ggplot2::geom_point(alpha=0.9) + ggplot2::labs(x="Error", y="Expert ID", color="Error dimension")
   p
 }
 

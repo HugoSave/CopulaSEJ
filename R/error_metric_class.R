@@ -81,24 +81,65 @@ new_error_metric <- function(name,
   ))
 }
 
-new_independence_function <- function(name, f, f_prime_q, f_is_increasing, get_f_fix_m=NULL) {
+new_decoupler <- function(name, f, f_prime_q, f_increasing, fix_m, f_inverse=NULL) {
   checkmate::assert_string(name)
-  checkmate::assert_function(f)
-  checkmate::assert_function(f_prime_q)
-  checkmate::assert_function(f_is_increasing)
-  checkmate::assert_function(get_f_fix_m, null.ok = TRUE)
+  checkmate::assert_function(f, args=c("q", "m"), ordered=TRUE)
+  checkmate::assert_function(f_prime_q, args=c("q", "m"), ordered=TRUE)
+  checkmate::assert_function(f_increasing, args=c("m"), ordered=TRUE)
+  checkmate::assert_function(fix_m, args=c("m"), ordered=TRUE)
+  checkmate::assert_function(f_inverse, args=c("q", "m"), null.ok=TRUE)
 
   return(structure(
     list(
       name = name,
       f = f,
       f_prime_q = f_prime_q,
-      f_is_increasing=f_is_increasing,
-      f_freeze_m = get_f_fix_m
+      f_increasing=f_increasing,
+      fix_m = fix_m,
+      f_inverse=f_inverse
     ),
-    class = "independence_function"
+    class = "decoupler"
   ))
 }
+
+print.decoupler <- function(object, ...) {
+  cat(object$name, "decoupler\n")
+  print(glue::glue("Includes functions with output dimension nxExD:"))
+  cat("f(q,m)\n")
+  cat("f_prime_q(q,m)\n")
+  cat("f_increasing(m)\n")
+  cat("fix_m(m)\n")
+}
+
+print.fixed_decopuler <- function(object, ...) {
+  cat(object$name, "fixed decoupler\n")
+  print(glue::glue("Includes functions with output dimension nxEx{object$D}:"))
+  cat("f(q)\n")
+  cat("f_prime_q(q)\n")
+  cat("f_increasing()\n")
+}
+
+new_fixed_decoupler <- function(name, f, f_prime_q, f_increasing, D, f_inverse=NULL) {
+  checkmate::assert_string(name)
+  checkmate::assert_function(f, args=c("q"), ordered=TRUE)
+  checkmate::assert_function(f_prime_q, args=c("q"), ordered = TRUE)
+  checkmate::assert_function(f_increasing, args=character(0))
+  checkmate::assert_count(D, positive=TRUE)
+  checkmate::assert_function(f_inverse, args=c("q"), ordered=TRUE, null.ok=TRUE)
+
+  return(structure(
+    list(
+      name = name,
+      f = f,
+      f_prime_q = f_prime_q,
+      f_increasing=f_increasing,
+      D=D,
+      f_inverse=f_inverse
+    ),
+    class = "fixed_decoupler"
+  ))
+}
+
 
 validate_error_metric_on_observations <- function(error_metric, m_training, q_training, m_test) {
 
@@ -563,32 +604,39 @@ not_yet_implemented <- function(...) {
 }
 
 ##### CDF error
-indep_CDF <- function(q_values, m_matrix, overshoot=0.1, k_percentiles=c(5,50,95)){
-  # fit distributions to m_matrix. m_matrix should be a matrix with E rows and D columns
-  ind_cond_m <- get_cdf_indep_function_fix_m(m_matrix, overshoot, k_percentiles)
-  ind_cond_m$f(q_values)
+indep_CDF <- function(q, m, overshoot=0.1, k_percentiles=c(5,50,95)){
+  # fit distributions to m. m should be a matrix with E rows and D columns
+  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles)
+  ind_cond_m$f(q)
 }
 
-indep_CDF_prime_q <- function(q_values, m_matrix, overshoot=0.1, k_percentiles=c(5,50,95)){
-  # fit distributions to m_matrix. m_matrix should be a matrix with E rows and D columns
-  ind_cond_m <- get_cdf_indep_function_fix_m(m_matrix, overshoot, k_percentiles)
-  ind_cond_m$f_prime_q(q_values)
+indep_CDF_prime_q <- function(q, m, overshoot=0.1, k_percentiles=c(5,50,95)){
+  # fit distributions to m. m should be a matrix with E rows and D columns
+  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles)
+  ind_cond_m$f_prime_q(q)
 }
 
-indep_CDF_is_increasing <- function(m_matrix, overshoot=0.1, k_percentiles=c(5,50,95)){
-  # fit distributions to m_matrix. m_matrix should be a matrix with E rows and D columns
-  ind_cond_m <- get_cdf_indep_function_fix_m(m_matrix, overshoot, k_percentiles)
+indep_CDF_increasing <- function(m, overshoot=0.1, k_percentiles=c(5,50,95)){
+  # fit distributions to m. m should be a matrix with E rows and D columns
+  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles)
   ind_cond_m$f_increasing()
 }
 
-get_CDF_indep_class <- function() {
+decouple_CDF_inverse <- function(q, m, overshoot=0.1, k_percentiles=c(5,50,95)){
+  # fit distributions to m. m should be a matrix with E rows and D columns
+  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles)
+  ind_cond_m$f_inverse(q)
+}
+
+get_CDF_decoupler <- function() {
   return(
-    new_independence_function(
-      name="independence CDF",
+    new_decoupler(
+      name="CDF",
       f=indep_CDF,
       f_prime_q=indep_CDF_prime_q,
-      f_is_increasing=indep_CDF_is_increasing,
-      get_f_fix_m = get_cdf_indep_function_fix_m
+      f_increasing=indep_CDF_increasing,
+      fix_m = get_cdf_indep_function_fix_m,
+      f_inverse=decouple_CDF_inverse
     )
   )
 }
@@ -603,22 +651,31 @@ get_CDF_indep_class <- function() {
 #' @export
 #'
 #' @examples
-get_cdf_indep_function_fix_m <- function(m_matrix, overshoot=0.1, k_percentiles = c(5,50,95)) {
-  m_matrix <- typecheck_and_convert_matrix_vector(m_matrix, vector())
-  N = nrow(m_matrix)
+get_cdf_indep_function_fix_m <- function(m, overshoot=0.1, k_percentiles = c(5,50,95)) {
+  m <- typecheck_and_convert_matrix_vector(m, vector())
+  checkmate::assert_numeric(k_percentiles, len=ncol(m))
+  N = nrow(m)
   is_increasing_matrix <- matrix(TRUE, nrow=N, ncol=1) # single CDF value per expert
-  L = min(m_matrix)
-  U = max(m_matrix)
+  L = min(m)
+  U = max(m)
   L_star = L - overshoot * (U - L)
   U_star = U + overshoot * (U - L)
   cdf_values <- c(0, k_percentiles/100, 1)
-  extended_m_matrix <- abind::abind(matrix(L_star, nrow=N, ncol=1), m_matrix, matrix(U_star, nrow=N, ncol=1), along=2)
+  extended_m_matrix <- abind::abind(matrix(L_star, nrow=N, ncol=1), m, matrix(U_star, nrow=N, ncol=1), along=2)
   distributions <- purrr::array_branch(extended_m_matrix, 1) |>
     purrr::map(\(fractiles) {
       linear_distribution_interpolation(fractiles, cdf_values)
     })
 
-  f_fix_m <- function(q) {
+  f_inverse <- function(q) {
+    values <- distributions |> purrr::map(\(p) {
+      p$cdf_inv(q)
+    }) |> do.call(what = cbind)
+    dim(values) <- c(nrow(values), ncol(values), 1)
+    values
+  }
+
+  f <- function(q) {
     values <- distributions |> purrr::map(\(p) {
       p$cdf(q)
     }) |> do.call(what = cbind)
@@ -641,10 +698,13 @@ get_cdf_indep_function_fix_m <- function(m_matrix, overshoot=0.1, k_percentiles 
     return(is_increasing_matrix)
   }
 
-  list(
-    f=f_fix_m,
+  new_fixed_decoupler(
+    name = "CDF",
+    f=f,
     f_prime_q=f_prime_q_fix_m,
-    f_increasing = f_increasing
+    f_increasing = f_increasing,
+    D=1,
+    f_inverse=f_inverse
   )
 }
 

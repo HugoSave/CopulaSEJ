@@ -11,6 +11,73 @@ studies <- load_data_49_filtered(relative_dev_folder = TRUE)
 k_percentiles <- c(5,50,95)
 summ_fun <- get_three_quantiles_summarizing_function()$f
 ```
+# Examnple CDF independence metric
+```{r}
+study <- filter_study_keep_ids(studies, 4)[[1]]
+test_question_id <- 10
+test_set <- study |> filter(question_id == test_question_id)
+training_set <- study |> filter(question_id != test_question_id)
+test_m_matrix <- test_set |> study_df_single_question_to_assessment_matrix(summ_fun, k_percentiles)
+training_assessments <- training_set |> study_df_to_assessment_array(summ_fun, k_percentiles)
+cdf_metric <- get_CDF_decoupler()
+```
+```{r}
+res <- fit_and_construct_posterior_indep(
+        training_assessments,
+        training_set |> study_df_to_realizations(),
+        test_m_matrix,
+        "vine",
+        cdf_metric,
+        vine_fit_settings = list(),
+        error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=1),
+        q_not_cross_zero = FALSE
+      )
+
+error_margins <- res$error_margins |> 
+   purrr::map(\(x) {
+  #x$d = switch(x$d, "1" = "M5", "2" = "M50", "3" = "M95"); 
+  x$expert_id = paste0("E", x$expert_id);
+  x })
+
+res$errors |> plot_3d_errors()  |> plot_add_supports(error_margins)
+
+```
+```{r}
+error_margins[1:7] |> plot_distributions("pdf")
+```
+```{r}
+error_margins[[7]]$pdf(0.1)
+```
+
+```{r}
+
+support <- res$posterior$support
+log_posterior <- res$posterior$logDM
+x = seq(support[1], support[2], length.out = 1000)
+y = exp(log_posterior(x))
+plot(x, y, type = "l", main = "log posterior")
+```
+```{r}
+integrate(function(x) exp(log_posterior(x)), support[1], support[2], subdivisions = 10000)
+```
+```{r}
+samples <- sample_log_unnormalized_density(
+  log_posterior,
+  support,
+  1000
+)
+```
+```{r}
+mean(samples)
+```
+
+```{r}
+plot(density(samples))
+```
+
+
+
+
 # Example 1 : Ratio error
 ```{r}
 study <- filter_study_keep_ids(studies, 5)[[1]]

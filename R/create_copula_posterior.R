@@ -187,9 +187,8 @@ create_log_unnormalized_posterior_indep <- function(indep_copula, indep_margins,
   nr_dims <- dim(indep_copula)[[1]]
   checkmate::assert_list(indep_margins, len=nr_dims)
 
-  indep_fix_m <- indep_class$f_freeze_m(m_matrix)
+  indep_fix_m <- indep_class$fix_m(m_matrix)
 
-  is_increasing_flat <- indep_fix_m$f_increasing() |> flatten_matrix_row_by_row()
   #is_increasing_flat <- calc_is_increasing_flat(indep_copula, m)
 
   stopifnot(!is.null(support))
@@ -214,7 +213,7 @@ create_log_unnormalized_posterior_indep <- function(indep_copula, indep_margins,
     pdf_cdf_vals <- calc_pdf_and_cdf_values_flat(indep_values, indep_margins)
 
     pdf_values <- pdf_cdf_vals$pdf_values
-    cdf_values <- flip_cdf_values_if_decreasing(pdf_cdf_vals$cdf_values, is_increasing_flat)
+    cdf_values <- pdf_cdf_vals$cdf_values
 
     if (is(indep_copula, "vinecop_dist")) {
       copula_density_values <- rvinecopulib::dvinecop(cdf_values, indep_copula, cores=1)
