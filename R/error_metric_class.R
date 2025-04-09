@@ -87,7 +87,7 @@ new_decoupler <- function(name, f, f_prime_q, f_increasing, fix_m, f_inverse=NUL
   checkmate::assert_function(f_prime_q, args=c("q", "m"), ordered=TRUE)
   checkmate::assert_function(f_increasing, args=c("m"), ordered=TRUE)
   checkmate::assert_function(fix_m, args=c("m"), ordered=TRUE)
-  checkmate::assert_function(f_inverse, args=c("q", "m"), null.ok=TRUE)
+  checkmate::assert_function(f_inverse, args=c("z", "m"), null.ok=TRUE)
 
   return(structure(
     list(
@@ -125,7 +125,7 @@ new_fixed_decoupler <- function(name, f, f_prime_q, f_increasing, D, f_inverse=N
   checkmate::assert_function(f_prime_q, args=c("q"), ordered = TRUE)
   checkmate::assert_function(f_increasing, args=character(0))
   checkmate::assert_count(D, positive=TRUE)
-  checkmate::assert_function(f_inverse, args=c("q"), ordered=TRUE, null.ok=TRUE)
+  checkmate::assert_function(f_inverse, args=c("z"), ordered=TRUE, null.ok=TRUE)
 
   return(structure(
     list(
@@ -604,15 +604,15 @@ not_yet_implemented <- function(...) {
 }
 
 ##### CDF error
-indep_CDF <- function(q, m, overshoot=0.1, k_percentiles=c(5,50,95)){
+indep_CDF <- function(q, m, overshoot=0.1, k_percentiles=c(5,50,95), scale="linear"){
   # fit distributions to m. m should be a matrix with E rows and D columns
-  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles)
+  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles, scale)
   ind_cond_m$f(q)
 }
 
-indep_CDF_prime_q <- function(q, m, overshoot=0.1, k_percentiles=c(5,50,95)){
+indep_CDF_prime_q <- function(q, m, overshoot=0.1, k_percentiles=c(5,50,95), scale="linear"){
   # fit distributions to m. m should be a matrix with E rows and D columns
-  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles)
+  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles, scale)
   ind_cond_m$f_prime_q(q)
 }
 
@@ -622,21 +622,22 @@ indep_CDF_increasing <- function(m, overshoot=0.1, k_percentiles=c(5,50,95)){
   ind_cond_m$f_increasing()
 }
 
-decouple_CDF_inverse <- function(q, m, overshoot=0.1, k_percentiles=c(5,50,95)){
+decouple_CDF_inverse <- function(z, m, overshoot=0.1, k_percentiles=c(5,50,95), scale="linear"){
   # fit distributions to m. m should be a matrix with E rows and D columns
-  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles)
-  ind_cond_m$f_inverse(q)
+  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles, scale)
+  ind_cond_m$f_inverse(z)
 }
 
-get_CDF_decoupler <- function() {
+
+get_CDF_decoupler <- function(scale="linear") {
   return(
     new_decoupler(
       name="CDF",
-      f=indep_CDF,
-      f_prime_q=indep_CDF_prime_q,
+      f=\(q,m) indep_CDF(q, m, scale=scale),
+      f_prime_q=\(q,m) indep_CDF_prime_q(q, m, scale=scale),
       f_increasing=indep_CDF_increasing,
-      fix_m = get_cdf_indep_function_fix_m,
-      f_inverse=decouple_CDF_inverse
+      fix_m = \(m) get_cdf_indep_function_fix_m(m, scale=scale),
+      f_inverse=\(z, m) decouple_CDF_inverse(z, m, scale=scale)
     )
   )
 }
@@ -651,25 +652,35 @@ get_CDF_decoupler <- function() {
 #' @export
 #'
 #' @examples
-get_cdf_indep_function_fix_m <- function(m, overshoot=0.1, k_percentiles = c(5,50,95)) {
+get_cdf_indep_function_fix_m <- function(m, overshoot=0.1, k_percentiles = c(5,50,95), scale="linear") {
   m <- typecheck_and_convert_matrix_vector(m, vector())
   checkmate::assert_numeric(k_percentiles, len=ncol(m))
   N = nrow(m)
   is_increasing_matrix <- matrix(TRUE, nrow=N, ncol=1) # single CDF value per expert
   L = min(m)
   U = max(m)
-  L_star = L - overshoot * (U - L)
-  U_star = U + overshoot * (U - L)
+  new_support <- widen_support(c(L, U), overshoot, support_restriction = "strict_positive")
+  L_star = new_support[1]
+  U_star = new_support[2]
   cdf_values <- c(0, k_percentiles/100, 1)
   extended_m_matrix <- abind::abind(matrix(L_star, nrow=N, ncol=1), m, matrix(U_star, nrow=N, ncol=1), along=2)
-  distributions <- purrr::array_branch(extended_m_matrix, 1) |>
-    purrr::map(\(fractiles) {
-      linear_distribution_interpolation(fractiles, cdf_values)
-    })
+  if (scale=="linear") {
+    distributions <- purrr::array_branch(extended_m_matrix, 1) |>
+      purrr::map(\(fractiles) {
+        linear_distribution_interpolation(fractiles, cdf_values)
+      })
+  } else if(scale=="log") {
+    distributions <- purrr::array_branch(extended_m_matrix, 1) |>
+      purrr::map(\(fractiles) {
+        log_linear_distribution_interpolation(fractiles, cdf_values)
+      })
+  } else {
+    stop("Unknown scale")
+  }
 
-  f_inverse <- function(q) {
+  f_inverse <- function(z) {
     values <- distributions |> purrr::map(\(p) {
-      p$cdf_inv(q)
+      p$cdf_inv(z)
     }) |> do.call(what = cbind)
     dim(values) <- c(nrow(values), ncol(values), 1)
     values

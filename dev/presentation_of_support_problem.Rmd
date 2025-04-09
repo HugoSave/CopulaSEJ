@@ -13,24 +13,25 @@ summ_fun <- get_three_quantiles_summarizing_function()$f
 ```
 # Examnple CDF independence metric
 ```{r}
-study <- filter_study_keep_ids(studies, 4)[[1]]
+study <- filter_study_keep_ids(studies, 43)[[1]]
+study <- change_small_value_in_study_list(list(study), k_percentiles_to_colname(k_percentiles), min_value=0.01)$study_list[[1]]
 test_question_id <- 10
 test_set <- study |> filter(question_id == test_question_id)
 training_set <- study |> filter(question_id != test_question_id)
 test_m_matrix <- test_set |> study_df_single_question_to_assessment_matrix(summ_fun, k_percentiles)
 training_assessments <- training_set |> study_df_to_assessment_array(summ_fun, k_percentiles)
-cdf_metric <- get_CDF_decoupler()
+cdf_metric <- get_CDF_decoupler(scale="linear")
 ```
 ```{r}
 res <- fit_and_construct_posterior_indep(
         training_assessments,
         training_set |> study_df_to_realizations(),
         test_m_matrix,
-        "vine",
+        "indep",
         cdf_metric,
         vine_fit_settings = list(),
-        error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=1),
-        q_not_cross_zero = FALSE
+        error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=0.1),
+        q_support_restriction = "positive"
       )
 
 error_margins <- res$error_margins |> 
@@ -43,14 +44,35 @@ res$errors |> plot_3d_errors()  |> plot_add_supports(error_margins)
 
 ```
 ```{r}
-error_margins[1:7] |> plot_distributions("pdf")
-```
-```{r}
-error_margins[[7]]$pdf(0.1)
+obs <- res$flattened_errors[,6]
+fit <- ks::kde.boundary(x=obs, xmin=0, xmax=1, boundary.kernel="beta")
+f<- approxfun(fit$eval.points, fit$estimate, yleft=0, yright=0)
+cdf<-integrate(f, min(fit$eval.points), 0.5)
+plot(fit)
 ```
 
 ```{r}
+error_margins[6] |> plot_distributions("pdf&cdf")
+```
 
+```{r}
+margin <- error_margins[[6]]
+x <- seq(margin$support[1], margin$support[2], length.out = 1000)
+y <- margin$pdf(x)
+integrate(margin$pdf, margin$support[1], margin$support[2], subdivisions = 10000)
+```
+
+```{r}
+error_margins[[6]]$pdf(0.4)
+```
+```{r}
+test_set_ext <- add_0_and_100_percentiles(test_set, k_percentiles)
+distributions <- interpolate_distributions(test_set_ext, interpolation = "linear")
+distributions |> plot_distributions("pdf", fix_range = c(0,300))
+```
+
+
+```{r}
 support <- res$posterior$support
 log_posterior <- res$posterior$logDM
 x = seq(support[1], support[2], length.out = 1000)
@@ -58,7 +80,7 @@ y = exp(log_posterior(x))
 plot(x, y, type = "l", main = "log posterior")
 ```
 ```{r}
-integrate(function(x) exp(log_posterior(x)), support[1], support[2], subdivisions = 10000)
+integrate(function(x) exp(log_posterior(x)), support[1], 100, subdivisions = 10000)
 ```
 ```{r}
 samples <- sample_log_unnormalized_density(
@@ -68,11 +90,14 @@ samples <- sample_log_unnormalized_density(
 )
 ```
 ```{r}
-mean(samples)
+median(samples)
 ```
 
 ```{r}
+samp_small <- samples[samples < 1000]
 plot(density(samples))
+plot(density(samp_small))
+
 ```
 
 

@@ -6,11 +6,25 @@ posterior_to_mean <- function(log_unnormalized_posterior, support, num_samples=1
 }
 
 # compute simultaneous because they share the same samples
-posterior_mean_and_likelihood <- function(log_unnormalized_posterior, support, true_value, num_samples=1000) {
+posterior_performance_metrics <- function(log_unnormalized_posterior, support, true_value, num_samples=1000) {
   samples <- sample_log_unnormalized_density(log_unnormalized_posterior, support, num_samples)
   mean_value <- mean(samples)
-  likelihood <- estimate_margin_kde(samples, support)$pdf(true_value)
-  return(list(mean=mean_value, likelihood=likelihood))
+  median_value <- median(samples)
+
+  fit <- ks::kde.boundary(x=samples, xmin=support[1], xmax=support[2], boundary.kernel="beta")
+  f<- approxfun(fit$eval.points, fit$estimate, yleft=0, yright=0)
+  # below is not robust enough for some samples.
+  # try integration
+  # tryCatch(
+  #   cumulative_probability<-integrate(f, min(fit$eval.points), true_value, subdivisions = 100000, stop.on.error = FALSE)$value,
+  #   error = function(e) {
+  #     # If integration fails, return NA
+  #     cumulative_probability <- NA
+  #   }
+  # )
+
+  neg_log_like <- -log(f(true_value))
+  return(list(mean=mean_value, median=median_value, neg_log_lik=neg_log_like))#, cum_prob=cumulative_probability))
 }
 
 

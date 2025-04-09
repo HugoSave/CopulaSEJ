@@ -9,6 +9,7 @@ run_study <- function(studies, error_metric, summarizing_function, prediction_me
                               !!!sim_params
                               ))
 
+
   analysis_res <- run_analysis_per_study(studies, params)
   analysis_res$results["prediction_method"] <- glue::glue("copula={error_metric$name}:{summarizing_function$name} summarizer:prediction method={prediction_methd}")
   analysis_res
@@ -21,14 +22,17 @@ if (!interactive()) {
   source("dev/dev_utils.R")
 
   file_name <- "dev/output/data49_nov24.rds"
+  numerical_col_names <- c(k_percentiles_to_colname(c(5, 50, 95)), "realization")
   studies <- readRDS(file_name)
   studies <- filter_questions_in_studies_non_negative(studies)
+  #studies <- filter_studies_support_magnitude_diff(studies, numerical_col_names, max_mag_diff = 10000)
+  #studies <- filter_studies_support_diff(studies, numerical_col_names, max_abs_diff = 10000)
   studies <- filter_studies_few_questions(studies, min_questions=11)
   studies <- filter_study_remove_ids(studies, study_ids=7)
-  numerical_col_names <- c(k_percentiles_to_colname(c(5, 50, 95)), "realization")
-  list_mod <- change_value_in_study_list(studies, numerical_col_names, 0.001, 0.0015)$study_list
-  list_mod <- change_value_in_study_list(list_mod, numerical_col_names, 0, 0.001)$study_list
-
+  #list_mod <- change_value_in_study_list(studies, numerical_col_names, 0.001, 0.0015)$study_list
+  #list_mod <- change_small_value_in_study_list(list_mod, numerical_col_names, 0.001)$study_list
+  # list_mod <- change_value_in_study_list(list_mod, numerical_col_names, 0, 0.001)$study_list
+  #list_mod <- filter_studies_support_magnitude_diff(list_mod, numerical_col_names, max_mag_diff = 1000)
 
   data_list_short <- list_mod
   results <- list()
@@ -60,8 +64,13 @@ if (!interactive()) {
 
   print("Sampling predictions...")
 
-  preds <- results_df$posterior |> purrr::map_dbl(\(post) mean(sample_log_unnormalized_density(post$logDM, post$support, 1000)))
-  results_df$prediction = preds
+  #preds <- results_df$posterior |> purrr::map_dbl(\(post) mean(sample_log_unnormalized_density(post$logDM, post$support, 1000)))
+  list_of_metrics <- results_df$posterior |> purrr::imap(\(post, i) {
+    posterior_performance_metrics(post$logDM, post$support, results_df$realization[[i]], num_samples=1000)
+  })
+  metric_df <- list_of_metrics |> purrr::list_transpose() |> tibble::as_tibble()
+  results_df <- dplyr::bind_cols(results_df, metric_df)
+  results_df$prediction <- results_df$median
   results_df$error = results_df$prediction - results_df$realization
   results_df$rel_error = results_df$error / results_df$realization
 

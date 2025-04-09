@@ -32,6 +32,50 @@ interpolate_distributions <- function(data, k_percentiles=c(0,5,50,95,100), inte
   distributions
 }
 
+log_linear_distribution_interpolation <- function(x, cdf_values) {
+  checkmate::assert_numeric(x, finite=TRUE, unique=TRUE, sorted=TRUE)
+  checkmate::assert_true(min(x) > 0)
+  checkmate::assert_numeric(cdf_values, lower=0, upper=1, sorted=TRUE)
+  support = range(x)
+  x_log = log(x)
+  x_log_dist = linear_distribution_interpolation(x_log, cdf_values)
+  adjusted_pdf <- function(x_input) {
+    x_in_support = x_input > support[1] & x_input < support[2]
+    pdf_in_support = x_log_dist$pdf(log(x_in_support)) / x_in_support
+    x_input[!x_in_support] <- 0
+    x_input[x_in_support] <- pdf_in_support
+    x_input
+  }
+  adjusted_cdf <- function(x_input) {
+    x_left_outside <- x_input < support[1]
+    x_right_outside <- x_input > support[2]
+    x_in_support <- !(x_left_outside | x_right_outside)
+    cdf_in_support <- x_log_dist$cdf(log(x_in_support))
+    x_input[x_left_outside] <- 0
+    x_input[x_right_outside] <- 1
+    x_input[x_in_support] <- cdf_in_support
+    x_input
+  }
+
+  adjusted_cdf_inv <- function(p_input) {
+    exp(x_log_dist$cdf_inv(p_input))
+  }
+
+  sample_fun <- function(n) {
+    exp(x_log_dist$sample(n))
+  }
+
+  return(
+    new_distribution(
+      adjusted_cdf,
+      adjusted_pdf,
+      range(x),
+      sample_fun,
+      adjusted_cdf_inv
+    )
+  )
+}
+
 
 # Function to estimate a linear cdf distribution from a set of samples
 # x: the fractile values

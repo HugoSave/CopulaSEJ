@@ -47,6 +47,6 @@ produce_posterior_estimates <- function(res_df) {
     log_post <- row$posterior[[1]]$logDM
     support <- row$posterior[[1]]$support
     realization <- row$realization
-    posterior_mean_and_likelihood(log_post, support, realization, num_samples=500)
+    posterior_performance_metrics(log_post, support, realization, num_samples=500)
   })
 }

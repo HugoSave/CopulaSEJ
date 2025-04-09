@@ -116,8 +116,6 @@ stopifnot(nr_0_realizations == nr_0_realizations_other)
 print(paste("Number of infinite relative errors: ", nr_0_realizations))
 
 
-
-
 relative_erros_violins <- results_df |> filter(realization != 0 & abs(rel_error) < 10 & study_id <= 20) |> #filter(!(prediction_method %in% c("copula"))) |>
   ggplot(aes(prediction_method, rel_error)) +
   geom_violin() +
@@ -130,22 +128,23 @@ relative_erros_violins
 ```
 ```{r}
 # some plot that per study shows the prediction of a specific method
-pred_method = "equal_weights"
 
-nr_studies <- length(studies)
+max_rel_error_in_plt = 10
+
+nr_studies <- max(results_df$study_id)
 breaks <- unique(c(1, seq(from=10, to=nr_studies, by=10), nr_studies))
 minor_b <- 1:nr_studies
 
-rel_error_per_plot <- results_df |> filter(realization!=0 & abs(rel_error) < 50) |> ggplot(aes(study_id, rel_error, group=study_id)) +
+rel_error_per_plot <- results_df |> filter(realization!=0 & abs(rel_error) < max_rel_error_in_plt) |> ggplot(aes(study_id, rel_error, group=study_id)) +
   geom_boxplot() + facet_grid(rows=vars(prediction_method)) + 
   scale_x_continuous(breaks = breaks, minor_breaks=minor_b) +
   labs(x = "Study ID",
        y = "Relative Error")
 
-nr_filtered_points <- results_df |> filter(realization!=0 & abs(rel_error) < 50) |> nrow()
+nr_filtered_points <- results_df |> filter(realization!=0 & abs(rel_error) < max_remax_rel_error_in_plt) |> nrow()
 nr_away_filtered_points <- results_df |> nrow() - nr_filtered_points
 # lowest number of points for a study
-min_points <- study_data |> filter(realization!=0 & abs(rel_error) < 50) |> group_by(study_id, prediction_method) |>
+min_points <- study_data |> filter(realization!=0 & abs(rel_error) < max_remax_rel_error_in_plt) |> group_by(study_id, prediction_method) |>
   summarise(n=n(), .groups="keep") |> pull(n) |> which.min()
 
 ggsave("output/rel_error_per_plot_generalization.pdf", rel_error_per_plot, width = 10, height = 10)

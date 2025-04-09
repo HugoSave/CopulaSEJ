@@ -136,17 +136,6 @@ fit_copula <- function(error_obs, copula_model = "joe",
   fitted_params@copula
 }
 
-# Widen percentile columns
-widen_percentiles <- function(data) {
-  # convert columns like `xth percentile` to a percentile column
-  data |> dplyr::pivot_longer(
-    cols = dplyr::contains("percentile"),
-    names_to = "k",
-    values_to = "k_percentile"
-  ) |>
-    dplyr::mutate(k = readr::parse_number(k))
-}
-
 # Returns a list frame with the L, U, L* and U* for the assessmenet given. Must be usedd for a single study and question.
 calculate_assessment_support <- function(assessments,
                                          k_percentiles = c(5, 50, 95),
@@ -224,31 +213,6 @@ construct_error_distribution_JC_assumption <- function(distribution, error_metri
   error_distributions
 }
 
-test_construct_error_distribution_JC_assumption <- function() {
-  # test the find median function
-  expert_m <- c(-1, 2, 3)
-  distribution <- list(
-    cdf = function(x) {
-      pnorm(x, mean = 0, sd = 1)
-    },
-    pdf = function(x) {
-      dnorm(x, mean = 1, sd = 1)
-    },
-    support = c(-Inf, Inf)
-  )
-  error_metric <- get_linear_error_metric()
-  error_dists <- construct_error_distribution_JC_assumption(distribution, error_metric, expert_m)
-  # plot error dist
-  x = seq(-5, 5, by = 0.01)
-  y = map(error_dists, \(dist) {
-    dist$pdf(x)
-  })
-  purrr::walk(y, \(y_i) {
-    plot(x, y_i)
-    par(new = TRUE)
-  })
-
-}
 
 
 find_median_of_fun <- function(fun, support) {
@@ -449,11 +413,11 @@ estimate_margin_beta <- function(obs_vec, support=NULL, overshoot=0.1, out_of_bo
   list(pdf = pdf, cdf = cdf, support = support, approx_middle=approx_middle)
 }
 
-estimate_margin_kde <- function(obs, support) {
+estimate_margin_kde <- function(obs, support, bw="SJ") {
   if (!is.null(support)) {
-    kde <- stats::density.default(obs, bw = "SJ", kernel="gaussian", from=support[1], to=support[2])
+    kde <- stats::density.default(obs, bw = bw, kernel="gaussian", from=support[1], to=support[2])
   } else {
-    kde <- stats::density.default(obs, bw = "SJ", kernel="gaussian")
+    kde <- stats::density.default(obs, bw = bw, kernel="gaussian")
   }
 
   x <- kde$x
@@ -463,17 +427,22 @@ estimate_margin_kde <- function(obs, support) {
 
   #kde <- kde1d::kde1d(obs, xmin=xmin, xmax=xmax)
   pdf<- function (e_vec) {
-    #kde1d::dkde1d(e_vec, kde)
     # linear interpolation from x and y
     approx(x, y, e_vec, method="linear", yleft=0, yright=0)$y
   }
+  # because of the cut off with the support, it is not guaranteed the area is 1 so we normalize it here.
+  area <-  integrate(pdf, min(x), max(x))$value
+  pdf_normalized <- function (e_vec) {
+    pdf(e_vec) / area
+  }
+
   cdf <- function (e_vec) {
     #kde1d::pkde1d(e_vec, kde)
     approx(x, y_cdf, e_vec, method="linear", yleft=0, yright=1)$y
   }
   support <- range(x)
   approx_middle <- support[1] + (support[2]-support[1])/2
-  list(pdf = pdf, cdf = cdf, support = support, approx_middle=approx_middle)
+  list(pdf = pdf_normalized, cdf = cdf, support = support, approx_middle=approx_middle)
 }
 
 #' Estimate marginal distributions
@@ -495,40 +464,14 @@ estimate_margins <- function(observations, supports=NULL, method="beta", oversho
 
   margins <- purrr::map(seq_len(ncol(observations)), function(i) {
     obs <- observations[, i]
-    min_obs <- min(obs)
-    max_obs <- max(obs)
     if (method == "beta"){
       return(estimate_margin_beta(obs, supports[[i]], overshoot, out_of_boundary=out_of_boundary))
-
     }
     if (method =="kde") {
-
-      if (!is.null(supports[[i]])) {
-        kde <- stats::density.default(obs, bw = bw, kernel="gaussian", from=supports[[i]][1], to=supports[[i]][2])
-      } else {
-        kde <- stats::density.default(obs, bw = bw, kernel="gaussian")
-      }
-
-      x <- kde$x
-      y <- kde$y
-      # emperical cdf y values
-      y_cdf = cumsum(y) / cumsum(y)[length(y)]
-
-      #kde <- kde1d::kde1d(obs, xmin=xmin, xmax=xmax)
-      pdf<- function (e_vec) {
-        #kde1d::dkde1d(e_vec, kde)
-        # linear interpolation from x and y
-        approx(x, y, e_vec, method="linear", yleft=0, yright=0)$y
-      }
-      cdf <- function (e_vec) {
-        #kde1d::pkde1d(e_vec, kde)
-        approx(x, y_cdf, e_vec, method="linear", yleft=0, yright=1)$y
-      }
-      support <- range(x)
-      approx_middle <- support[1] + (support[2]-support[1])/2
-      list(pdf = pdf, cdf = cdf, support = support, approx_middle=approx_middle)
-
-    } else {stop(glue::glue("Unknown method: {method}"))}
+      return(estimate_margin_kde(obs, supports[[i]], bw=bw))
+    } else {
+      stop(glue::glue("Unknown method: {method}"))
+    }
 
   })
   margins
@@ -577,18 +520,29 @@ target_q_support_to_independence_supports <- function(target_q_support, m_test_m
   })
 }
 
-widen_support <- function(support, overshoot, not_cross_zero=TRUE) {
+widen_support <- function(support, overshoot, support_restriction=NULL) {
   # Expand the support by overshoot percent
-  checkmate::assert_numeric(support, len=2)
+  checkmate::assert_subset(support_restriction, c("positive", "strict_positive", NULL))
+  checkmate::assert_numeric(support, len=2, sorted=TRUE)
   checkmate::assert_numeric(overshoot, lower=0)
   support_width <- support[2] - support[1]
   new_support <- c(support[1] - overshoot * support_width, support[2] + overshoot * support_width)
-  if (not_cross_zero) {
-    if (support[1] > 0 && new_support[1] < 0) {
-      new_support[1] <- support[1]
+  if (is.null(support_restriction)) {
+    return(new_support)
+  }
+  if (support_restriction == "strict_positive") {
+    if (support[1] <= 0) {
+      stop("Support is not positive. Cannot widen support with 'strict_positive' restriction.")
     }
-    if (support[2] < 0 && new_support[2] > 0) {
-      new_support[2] <- support[2]
+    if (new_support[1] <= 0) {
+      new_support[1] <- support[1] * (1-overshoot)
+    }
+  } else if (support_restriction == "positive") {
+    if (support[1] < 0) {
+      stop("Support is negative. Cannot widen support with 'positive' restriction.")
+    }
+    if (new_support[1] < 0) {
+      new_support[1] <- 0
     }
   }
   new_support
@@ -597,23 +551,23 @@ widen_support <- function(support, overshoot, not_cross_zero=TRUE) {
 fit_and_construct_posterior_indep <- function(training_estimates, training_realizations,
                                            test_matrix,
                                            copula_model = "joe",
-                                           indep_class = NULL,
+                                           decoupler = NULL,
                                            vine_fit_settings = list(),
                                            error_estimation_settings=list(),
-                                           q_not_cross_zero=TRUE) {
-  if (is.null(indep_class)) {
-    indep_class <- get_ratio_error_metric()
+                                           q_support_restriction='positive') {
+  if (is.null(decoupler)) {
+    decoupler <- get_ratio_error_metric()
   }
   checkmate::assert_array(training_estimates, "numeric", d=3)
   checkmate::assert_numeric(training_realizations)
   checkmate::assert_matrix(test_matrix, "numeric")
-  checkmate::assert_class(indep_class, "decoupler")
+  checkmate::assert_class(decoupler, "decoupler")
   checkmate::assert_string(copula_model)
   checkmate::assert_list(vine_fit_settings)
   checkmate::assert_list(error_estimation_settings)
 
   # TODO implement a domain check prior?
-  # domain_check <- indep_class$check_domain(abind::abind(training_estimates,
+  # domain_check <- decoupler$check_domain(abind::abind(training_estimates,
   #                                                        test_matrix, along=1), training_realizations)
   #checkmate::makeAssertion(NULL, domain_check, var.name="m and q values", collection = NULL)
 
@@ -635,18 +589,18 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
     warining=c("ONE_EXPERT")
   }
 
-  errors <- assessment_array_to_indep_obs(training_estimates, training_realizations, indep_class$f)
+  errors <- assessment_array_to_indep_obs(training_estimates, training_realizations, decoupler$f)
   D_tilde = dim(errors)[3]
   flattened_errors <- flatten_3d_array_to_matrix(errors)
 
   target_q_support <- target_q_support_from_test_assessments(test_matrix)
 
   #errors_min_max <- get_error_margins_min_max(flattened_errors) # per dimension
-  #target_q_support <- find_target_q_support(errors_min_max, test_matrix, indep_class)
+  #target_q_support <- find_target_q_support(errors_min_max, test_matrix, decoupler)
 
-  target_q_support <- widen_support(target_q_support, 0.1, not_cross_zero = q_not_cross_zero)
+  target_q_support <- widen_support(target_q_support, 0.1,  support_restriction=q_support_restriction)
 
-  target_indep_supports <- target_q_support_to_independence_supports(target_q_support, test_matrix, indep_class)
+  target_indep_supports <- target_q_support_to_independence_supports(target_q_support, test_matrix, decoupler)
 
   # inject here allows us to pass the arg=value pairs of the list as arguments
   margin_distributions <- rlang::inject(estimate_margins(flattened_errors, target_indep_supports, !!!error_estimation_settings))
@@ -656,7 +610,7 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
 
   posterior<-create_log_unnormalized_posterior_indep(error_copula,
                                                margin_distributions,
-                                               indep_class,
+                                               decoupler,
                                                test_matrix,
                                                support=target_q_support)
   list(
@@ -690,10 +644,11 @@ fit_and_construct_posterior <- function(training_estimates, training_realization
                                                  error_metric = NULL,
                                         vine_fit_settings = list(),
                                         error_estimation_settings=list(),
-                                        q_not_cross_zero=TRUE) {
+                                        q_support_restriction='positive') {
   if (is.null(error_metric)) {
     error_metric <- get_ratio_error_metric()
   }
+  checkmate::assert_subset(q_support_restriction, c("positive", "strict_positive", NULL))
   checkmate::assert_array(training_estimates, "numeric", d=3)
   checkmate::assert_numeric(training_realizations)
   checkmate::assert_matrix(test_matrix, "numeric")
@@ -735,7 +690,7 @@ fit_and_construct_posterior <- function(training_estimates, training_realization
   #errors_min_max <- get_error_margins_min_max(flattened_errors) # per dimension
   #target_q_support <- find_target_q_support(errors_min_max, test_matrix, error_metric)
 
-  target_q_support <- widen_support(target_q_support, 0.1, not_cross_zero = q_not_cross_zero)
+  target_q_support <- widen_support(target_q_support, 0.1, support_restriction = q_support_restriction)
 
   target_error_supports <- target_q_support_to_error_supports(target_q_support, test_matrix, error_metric)
 
@@ -1173,7 +1128,7 @@ plot_3d_errors <- function(errors) {
 }
 
 ## make function to plot list of distributions
-plot_distributions <- function(distributions, which_plots = "pdf&cdf", not_cross_zero=FALSE, D=NULL, overshoot=0.1, fix_range=NULL, pdf_element_name="pdf", cdf_element_name="cdf") {
+plot_distributions <- function(distributions, which_plots = "pdf&cdf", q_support_restriction=NULL, D=NULL, overshoot=0.1, fix_range=NULL, pdf_element_name="pdf", cdf_element_name="cdf") {
   df <- tibble::tibble(
     x_data = numeric(),
     y_cdf = numeric(),
@@ -1184,7 +1139,7 @@ plot_distributions <- function(distributions, which_plots = "pdf&cdf", not_cross
   )
   for (i in seq_along(distributions)) {
     if (is.null(fix_range)) {
-      new_support <- widen_support(distributions[[i]]$support, overshoot = overshoot, not_cross_zero = not_cross_zero)
+      new_support <- widen_support(distributions[[i]]$support, overshoot = overshoot, support_restriction = q_support_restriction)
     } else{
       new_support <- fix_range
     }

@@ -27,6 +27,22 @@ combine_lists_of_functions_to_function <- function(densities_list) {
   list(cdfs=get_cdf_vals, pdfs=get_pdf_vals)
 }
 
+change_small_value_in_study_list <- function(study_list,
+                                               col_name,
+                                               min_value
+                                               ){
+  study_modified <- vector("integer")
+
+  for (i in seq_along(study_list)) {
+    mask <- study_list[[i]][col_name] < min_value
+    if (any(mask)) {
+      study_modified <- append(study_modified, study_list[[i]]$study_id |> head(1))
+    }
+    study_list[[i]][col_name][mask] <- min_value
+  }
+  list(study_list=study_list, study_modified=study_modified)
+}
+
 #' Replace a value in a list of studies
 #'
 #' @param study_list list of studies.
@@ -56,17 +72,44 @@ change_value_in_study_list <- function(study_list,
   list(study_list=study_list, study_modified=study_modified)
 }
 
-filter_questions_in_studies_non_negative <- function(study_list) {
+filter_questions_general <- function(study_list, filter_fun) {
   study_list |>
     purrr::map(\(study) {
       study |> split.data.frame(study$question_id) |> purrr::keep(
         \(question_df) {
-          min(question_df) >= 0
+          filter_fun(question_df)
         }) |> purrr::list_rbind()
     }) |>
     purrr::keep(\(study) nrow(study) > 0)
 }
 
+filter_questions_in_studies_non_negative <- function(study_list) {
+  filter_fun <- \(question_df) {
+    min(question_df) >= 0
+  }
+  filter_questions_general(study_list, filter_fun)
+}
+
+filter_studies_support_magnitude_diff <- function(study_list, assessment_cols, max_mag_diff=1000) {
+  filter_fun <- \(question_df) {
+    assessments <- question_df |> dplyr::select(dplyr::all_of(assessment_cols))
+    support <- c(min(assessments), max(assessments))
+    diff <- support[2] / support[1]
+    abs(diff) <= max_mag_diff
+  }
+  filter_questions_general(study_list, filter_fun)
+}
+
+
+filter_studies_support_diff <- function(study_list, assessment_cols, max_abs_diff=10000) {
+  filter_fun <- \(question_df) {
+    assessments <- question_df |> dplyr::select(dplyr::all_of(assessment_cols))
+    support <- c(min(assessments), max(assessments))
+    diff <- support[2] - support[1]
+    abs(diff) <= max_abs_diff
+  }
+  filter_questions_general(study_list, filter_fun)
+}
 
 filter_studies_few_questions <- function(study_list, min_questions=10) {
   study_list |>
