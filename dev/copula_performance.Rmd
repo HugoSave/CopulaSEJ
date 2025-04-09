@@ -37,7 +37,7 @@ params <- default_simulation_params(copula_model = "frank", prediction_method = 
 analysis_res <- run_analysis_per_study(data_list_short, params)
 
 prediction_methods = c("copula_calibration", "copula_error_density", "equal_weights", "global_opt")
-params <- default_simulation_params(copula_model = "joe", prediction_method = "copula_assumption")
+params <- default_simulation_params(copula_model = "joe", prediction_method = "perfect_expert")
 
 # loop through studies in data_list_form
 for (prediction_method in prediction_methods) {
@@ -85,7 +85,6 @@ abs_values <- results_df |> filter(realization!=0 & prediction!=0) |> mutate(rea
 pos_values
 
 abs_values
-
 ```
 ```{r, fig.width=10}
 abs_values <- results_df |> filter(realization!=0 & prediction!=0) |> mutate(realization=abs(realization), prediction=abs(prediction)) |> 
@@ -141,22 +140,34 @@ rel_error_per_plot <- results_df |> filter(realization!=0 & abs(rel_error) < max
   labs(x = "Study ID",
        y = "Relative Error")
 
-nr_filtered_points <- results_df |> filter(realization!=0 & abs(rel_error) < max_remax_rel_error_in_plt) |> nrow()
+nr_filtered_points <- results_df |> filter(realization!=0 & abs(rel_error) < max_rel_error_in_plt) |> nrow()
 nr_away_filtered_points <- results_df |> nrow() - nr_filtered_points
 # lowest number of points for a study
-min_points <- study_data |> filter(realization!=0 & abs(rel_error) < max_remax_rel_error_in_plt) |> group_by(study_id, prediction_method) |>
-  summarise(n=n(), .groups="keep") |> pull(n) |> which.min()
 
 ggsave("output/rel_error_per_plot_generalization.pdf", rel_error_per_plot, width = 10, height = 10)
 rel_error_per_plot
 ```
+```{r}
+neg_log_lik_per_study <- ggplot(results_df |> filter(is.finite(neg_log_lik)), aes(study_id, neg_log_lik, group=study_id)) +
+  geom_boxplot() + facet_grid(rows=vars(prediction_method)) + 
+  scale_x_continuous(breaks = breaks, minor_breaks=minor_b) +
+  labs(x = "Study ID",
+       y = "Negative Log Likelihood") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+neg_log_lik_per_study
+```
 
+### Point results all samples
 ```{r}
 
-results_df |> filter(realization!=0) |> group_by(prediction_method) |> summarise(MAPE = mean(abs(rel_error)), RMSPE = mean(rel_error^2), MAXPE = max(abs(rel_error)))
+results_df |> filter(realization!=0) |> group_by(prediction_method) |> summarise(MAPE = mean(abs(rel_error)), RMSPE = mean(rel_error^2), MAXPE = max(abs(rel_error)), MNLL=median(neg_log_lik), MedAPE = median(abs(rel_error)))
 
+```
+### Point results rel_error less than 10
+```{r}
 results_df |> filter(realization!=0 & abs(rel_error) < 10) |> group_by(prediction_method) |> summarise(MAPE = mean(abs(rel_error)), RMSPE = mean(rel_error^2), MAXPE = max(abs(rel_error)))
 ```
+
 
 ```{r}
 nr_studies <- length(unique(results_df$study_id))

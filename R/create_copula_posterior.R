@@ -165,13 +165,14 @@ create_log_unnormalized_posterior_JC <- function(error_copula, expert_distributi
 
     if (is_vine) {
       copula_density_values <- rvinecopulib::dvinecop(cdf_values, error_copula, cores=1)
+      log_copula_density_values = log(copula_density_values)
       # Not an obvious performance bootst on my system using more cores here.
       #copula_density_values <- rvinecopulib::dvinecop(cdf_values, error_copula, cores=4)
     } else {
-      copula_density_values <- copula::dCopula(cdf_values, error_copula)
+      log_copula_density_values <- copula::dCopula(cdf_values, error_copula, log = TRUE)
     }
 
-    return(log(copula_density_values) + added_log_pdf_values + added_log_error_metric_values )
+    return(log_copula_density_values + added_log_pdf_values + added_log_error_metric_values )
   }
 
   return(list(logDM=logDM, support=support))
@@ -217,15 +218,16 @@ create_log_unnormalized_posterior_indep <- function(indep_copula, indep_margins,
 
     if (is(indep_copula, "vinecop_dist")) {
       copula_density_values <- rvinecopulib::dvinecop(cdf_values, indep_copula, cores=1)
+      log_copula_density_values <- log(copula_density_values)
     } else {
-      copula_density_values <- copula::dCopula(cdf_values, indep_copula)
+      log_copula_density_values <- copula::dCopula(cdf_values, indep_copula, log=TRUE)
     }
     added_log_pdf_values <- rowSums(log(pdf_values))
 
     added_log_e_prime_m <- indep_fix_m$f_prime_q(q_vec) |> abs() |> log() |> rowSums()
 
     #added_log_e_prime_m <- calc_sum_log_e_prime_m(error_metric, m, q_vec)
-    ret_density[!out_of_support] <- log(copula_density_values) + added_log_pdf_values + added_log_e_prime_m
+    ret_density[!out_of_support] <- log_copula_density_values + added_log_pdf_values + added_log_e_prime_m
     ret_density
   }
   return(list(logDM=logDM, support=support))

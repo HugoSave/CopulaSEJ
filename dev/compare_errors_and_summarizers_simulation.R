@@ -1,17 +1,17 @@
 
-run_study <- function(studies, error_metric, summarizing_function, prediction_methd="copula", sim_params = list()){
-  print(paste("Analyzing error metric:", error_metric$name, ", and summarizing function:", summarizing_function$name, ", and prediction method:", prediction_methd))
+run_study <- function(studies, error_metric, summarizing_function, prediction_method="copula", copula_model="vine", sim_params = list()){
+  print(glue::glue("Analyzing method: {prediction_method} with copula model: {copula_model} and error metric: {error_metric$name} and summarising function: {summarizing_function$name}"))
 
-  #params <- default_simulation_params(copula_model = "vine", prediction_method = prediction_methd, error_metric = error_metric, summarizing_function = summarizing_function)
+  #params <- default_simulation_params(copula_model = "vine", prediction_method = prediction_method, error_metric = error_metric, summarizing_function = summarizing_function)
   params <- rlang::inject(
-    default_simulation_params(copula_model = "vine", prediction_method = prediction_methd,
+    default_simulation_params(copula_model = copula_model, prediction_method = prediction_method,
                               error_metric = error_metric, summarizing_function = summarizing_function,
                               !!!sim_params
                               ))
 
 
   analysis_res <- run_analysis_per_study(studies, params)
-  analysis_res$results["prediction_method"] <- glue::glue("copula={error_metric$name}:{summarizing_function$name} summarizer:prediction method={prediction_methd}")
+  analysis_res$results["prediction_method"] <- glue::glue("{prediction_method}:{copula_model}:{error_metric$name}:{summarizing_function$name}")
   analysis_res
 }
 
@@ -34,16 +34,53 @@ if (!interactive()) {
   # list_mod <- change_value_in_study_list(list_mod, numerical_col_names, 0, 0.001)$study_list
   #list_mod <- filter_studies_support_magnitude_diff(list_mod, numerical_col_names, max_mag_diff = 1000)
 
-  data_list_short <- list_mod
-  results <- list()
-  warnings <- list()
+  data_list_short <-studies[18]
 
-  res <- run_study(data_list_short, get_CDF_decoupler(), get_three_quantiles_summarizing_function(),
-                   sim_params = list(
-                     error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=1)
-                   ))
-  results <- append(results, list(res$results))
-  warnings <- append(warnings, list(res$warnings))
+  res_list <- list(
+    run_study(data_list_short, get_CDF_decoupler(), get_three_quantiles_summarizing_function(), prediction_method="copula",
+              copula_model="vine",
+              sim_params = list(
+                error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=1),
+                vine_fit_settings = list(family_set = c("onepar","indep"),
+                                         selcrit="mbicv", threshold=0.7),
+                q_support_restriction = 'non_negative'
+              )),
+    run_study(data_list_short, get_CDF_decoupler(), get_three_quantiles_summarizing_function(), prediction_method="copula",
+              copula_model = "indep",
+              sim_params = list(
+                error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=1),
+                q_support_restriction = 'non_negative'
+              )),
+    run_study(data_list_short, get_linear_decoupler(), get_median_summarizing_function(), prediction_method="copula",
+              copula_model = "vine",
+              sim_params = list(
+                q_support_restriction = 'non_negative',
+                vine_fit_settings = list(family_set = c("onepar","indep"),
+                                          selcrit="mbicv", threshold = 0.7)
+              )),
+    run_study(data_list_short, get_linear_decoupler(), get_median_summarizing_function(), prediction_method="copula",
+              copula_model = "indep",
+              sim_params = list(
+                q_support_restriction = 'non_negative'
+              )),
+
+    run_study(data_list_short, get_linear_error_metric(), get_median_summarizing_function(), prediction_method="perfect_expert",
+              copula_model = "frank",
+              sim_params = list(
+                q_support_restriction = 'non_negative'
+              ))
+    # run_study(data_list_short, get_linear_error_metric(), get_median_summarizing_function(), prediction_method="copula",
+    #           copula_model = "vine",
+    #           sim_params = list(
+    #             q_support_restriction = 'non_negative',
+    #             vine_fit_settings = list(family_set = c("all"),
+    #                                      selcrit="mbicv", threshold = 0.7)
+    #           ))
+  )
+  # vine_fit_settings = list(threshold = 0.8),
+  res_combined <- res_list |> purrr::transpose()
+  post_df = res_combined$results |> dplyr::bind_rows()
+  warnings = res_combined$warning
 
   # error_metrics = list(get_sigmoid_relative_error_metric(), get_sigmoid_linear_error_metric())
   # #error_metrics = list(get_ratio_error_metric(), get_linear_error_metric())
@@ -56,25 +93,27 @@ if (!interactive()) {
   #   }
   # }
 
-  res <- run_study(data_list_short, get_linear_error_metric(), get_median_summarizing_function(), "copula_assumption")
-  results <- append(results, list(res$results))
-  warnings <- append(warnings, list(res$warnings))
-
-  results_df <- dplyr::bind_rows(results)
-
   print("Sampling predictions...")
 
   #preds <- results_df$posterior |> purrr::map_dbl(\(post) mean(sample_log_unnormalized_density(post$logDM, post$support, 1000)))
-  list_of_metrics <- results_df$posterior |> purrr::imap(\(post, i) {
-    posterior_performance_metrics(post$logDM, post$support, results_df$realization[[i]], num_samples=1000)
-  })
-  metric_df <- list_of_metrics |> purrr::list_transpose() |> tibble::as_tibble()
-  results_df <- dplyr::bind_cols(results_df, metric_df)
-  results_df$prediction <- results_df$median
-  results_df$error = results_df$prediction - results_df$realization
-  results_df$rel_error = results_df$error / results_df$realization
+  list_of_metrics <- purrr::map2(post_df$posterior, post_df$realization, \(post, realization) {
+    if (is.null(post)) {
+      return(performance_metrics_list())
+    } else {
+      return(posterior_performance_metrics(post$logDM, post$support, realization, num_samples=1000))
+    }
 
-  saveRDS(list(results_df=results_df, warnings=warnings), "dev/output/compare_errors_and_summarizers_simulation.rds")
+  })
+
+  metric_df <- list_of_metrics |> purrr::list_transpose() |> tibble::as_tibble()
+  results <- dplyr::bind_cols(post_df, metric_df)
+  results$prediction <- results$median
+  results$error = results$prediction - results$realization
+  results$rel_error = results$error / results$realization
+  results$support = results$posterior |> purrr::map(\(x) x$support)
+  results$posterior = NULL  # we drop this column
+
+  saveRDS(list(results_df=results, warnings=warnings), "dev/output/compare_errors_and_summarizers_simulation.rds")
 
   print("Results saved to dev/output/compare_errors_and_summarizers_simulation.rds")
 }

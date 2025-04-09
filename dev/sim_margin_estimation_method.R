@@ -24,7 +24,7 @@ produce_posteriors <- function(){
       params <- default_simulation_params(copula_model = "vine", prediction_method = "copula", error_metric = error_metric, summarizing_function = summarizing_function)
 
       analysis_res <- run_analysis_per_study(studies, params)
-      analysis_res$results["prediction_method"] <- glue::glue("copula_assumption:{error_metric$name}:{summarizing_function$name} summarizer")
+      analysis_res$results["prediction_method"] <- glue::glue("perfect_expert:{error_metric$name}:{summarizing_function$name} summarizer")
       results <- append(results, list(analysis_res$results))
       warnings <- append(warnings, list(analysis_res$warnings))
     }

@@ -37,7 +37,7 @@ error_metric = get_linear_error_metric()
 #error_metric = get_ratio_error_metric()
 summarizing_function = get_three_quantiles_summarizing_function()
 #summarizing_function = get_linear_error_metric()
-params <- default_simulation_params(copula_model = "vine", prediction_method = "copula_assumption", error_metric = error_metric, summarizing_function = summarizing_function)
+params <- default_simulation_params(copula_model = "vine", prediction_method = "perfect_expert", error_metric = error_metric, summarizing_function = summarizing_function)
 #study_test_performance(study, params)
 
 test_question_id <- 2

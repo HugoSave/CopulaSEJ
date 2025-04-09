@@ -603,6 +603,66 @@ not_yet_implemented <- function(...) {
   stop("Not yet implemented")
 }
 
+#### Linear decoupler
+decoupler_linear <- function(q, m) {
+  m <- typecheck_and_convert_matrix_vector(m, q)
+  D = ncol(m)
+  E = nrow(m)
+  N = length(q)
+  m_rep_matrix = array(m, dim=(c(E, D, N))) |> aperm(c(3,1,2)) # this flips it to NxExD
+  q_rep_matrix = array(q, dim=(c(N, E, D)))
+  q - m_rep_matrix
+}
+
+decoupler_linear_prime_q <- function(q, m) {
+  m <- typecheck_and_convert_matrix_vector(m, q)
+  D = ncol(m)
+  E = nrow(m)
+  N = length(q)
+  array(1, dim=(c(N, E, D)))
+}
+
+decoupler_linear_increasing <- function(m) {
+  m <- typecheck_and_convert_matrix_vector(m, vector())
+  return(matrix(TRUE, nrow=nrow(m), ncol=ncol(m)))
+}
+
+decoupler_linear_inverse <- function(z, m) {
+  m <- typecheck_and_convert_matrix_vector(m, q)
+  D = ncol(m)
+  E = nrow(m)
+  N = length(q)
+  z_rep_matrix = array(z, dim=(c(N,E,D)))
+  m_rep_matrix = array(m, dim=(c(E, D, N))) |> aperm(c(3,1,2)) # this flips it to NxExD
+  (z_rep_matrix + m_rep_matrix)
+}
+
+decoupler_linear_fix_m <- function(m) {
+  increasing_matrix = decoupler_linear_increasing(m)
+  new_fixed_decoupler(
+    name="linear",
+    f=\(q) decoupler_linear(q,m),
+    f_prime_q=\(q) decoupler_linear_prime_q(q,m),
+    f_increasing=\() increasing_matrix,
+    D=ncol(m),
+    f_inverse=\(z) decoupler_linear_inverse(z,m)
+  )
+}
+
+get_linear_decoupler <- function() {
+  return(
+    new_decoupler(
+      name="linear decoupler",
+      f=decoupler_linear,
+      f_prime_q=decoupler_linear_prime_q,
+      f_increasing=decoupler_linear_increasing,
+      fix_m = decoupler_linear_fix_m,
+      f_inverse=decoupler_linear_inverse
+    )
+  )
+}
+
+
 ##### CDF error
 indep_CDF <- function(q, m, overshoot=0.1, k_percentiles=c(5,50,95), scale="linear"){
   # fit distributions to m. m should be a matrix with E rows and D columns
@@ -659,7 +719,11 @@ get_cdf_indep_function_fix_m <- function(m, overshoot=0.1, k_percentiles = c(5,5
   is_increasing_matrix <- matrix(TRUE, nrow=N, ncol=1) # single CDF value per expert
   L = min(m)
   U = max(m)
-  new_support <- widen_support(c(L, U), overshoot, support_restriction = "strict_positive")
+  if (scale=="linear"){
+    new_support <- widen_support(c(L, U), overshoot, support_restriction = NULL)
+  } else if (scale=="log") {
+    new_support <- widen_support(c(L, U), overshoot, support_restriction = "strict_positive")
+  }
   L_star = new_support[1]
   U_star = new_support[2]
   cdf_values <- c(0, k_percentiles/100, 1)
@@ -678,6 +742,7 @@ get_cdf_indep_function_fix_m <- function(m, overshoot=0.1, k_percentiles = c(5,5
     stop("Unknown scale")
   }
 
+  # returns ZxNx1 if N is rows of m and Z is length of z
   f_inverse <- function(z) {
     values <- distributions |> purrr::map(\(p) {
       p$cdf_inv(z)

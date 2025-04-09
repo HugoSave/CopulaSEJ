@@ -34,10 +34,31 @@ plot_error_between_experts <- function(study_data, err_name = "rel_error") {
         main = paste("Error between experts using column name:", err_name))
 }
 
+bicopula_smoothing_limits <- function(family) {
+
+  lower = -Inf
+  upper = Inf
+  if (family == "gaussian"){
+    lower = -0.2
+    upper = 0.2
+  } else if (family == "frank") {
+    lower = 0
+    upper = 1
+  } else if (family == "t") {
+    # only put a limit on the first correlation parameter
+    lower = matrix(c(-0.5 , -Inf), nrow=2, ncol=1)
+    upper = matrix(c(0.5 , 2), nrow=2, ncol=1) # 5 is of thick the tails should be
+  }
+
+  list(lower=lower, upper=upper)
+}
+
 # error_obs is nx(d*E) matrix (n questions, d * E errors)
 fit_copula <- function(error_obs, copula_model = "joe",
                        family_set = c("gaussian","indep"),
-                       selcrit="mbicv", psi0=0.5) {
+                       selcrit="mbicv", psi0=0.5,
+                       copula_fit_method="itau",
+                       threshold=0.5) {
   res <- checkmate::check_number(nrow(error_obs), lower=10)
   if (is.character(res)) {
     checkmate::makeAssertion(error_obs, "Number of training samples must be at least 10. This comes from a hard coded limit in the rvinecopula (and vineCopula) package when fitting a copula.",
@@ -47,46 +68,53 @@ fit_copula <- function(error_obs, copula_model = "joe",
   error_length = ncol(error_obs)
   lower = NULL
   upper = NULL
-
   pseudo_obs <- rvinecopulib::pseudo_obs(error_obs)
 
   # fit a copula to the data
   if (copula_model == "joe") {
     copula_model <- copula::joeCopula(dim = error_length)
     lower = 1
+    upper = 18.7 # 18.7 Corresponds to an Kendall tau of 0.9. For numerical reasons we limit it to this.
   } else if (copula_model == "indep") {
     return(copula::indepCopula(dim = error_length))
   } else if (copula_model == "frank") {
     copula_model <- copula::frankCopula(dim = error_length)
     lower = 0
+    upper = 38.28 # 38.28 Corresponds to an Kendall tau of 0.9. For numerical reasons we limit it to this.
   } else if (copula_model == "clayton") {
     copula_model <- copula::claytonCopula(dim = error_length)
+    lower = 0
+    upper = 18
   } else if (copula_model == "gumbel") {
     copula_model <- copula::gumbelCopula(dim = error_length)
+    lower = 1
+    upper = 10
   } else if (copula_model == "t") {
     copula_model <- copula::tCopula(dim = error_length)
+    lower = -9.8
+    upper = 9.8
   } else if (copula_model == "normal") {
     copula_model <- copula::normalCopula(dim = error_length, dispstr = "un")
+    lower = -9.8
+    upper = 9.8
+    copula_fit_method="itau"
   } else if (copula_model == "vine") {
 
 
-    cop_fit <- rvinecopulib::vinecop(pseudo_obs, family_set = family_set, cores =2, selcrit=selcrit, psi0=psi0)
+    cop_fit <- rvinecopulib::vinecop(pseudo_obs, family_set = family_set,
+                                     cores =2, selcrit=selcrit, psi0=psi0,
+                                     threshold = threshold)
+    cop_fit$pair_copulas <- purrr::modify_tree(cop_fit$pair_copulas,
+                                       leaf = \(bicop) {
+                                         limits <- bicopula_smoothing_limits(bicop$family)
+                                         bicop$parameters = pmax(bicop$parameters, limits$lower)
+                                         bicop$parameters = pmin(bicop$parameters, limits$upper)
+                                         bicop
+                                       })
+
     return(cop_fit)
 
-    #return(rvinecopulib::vinecop(pseudo_obs, family_set = "onepar", cores =2))
-    #
 
-    # res <- try(rvinecopulib::vinecop(pseudo_obs), silent = TRUE)
-    # if (inherits(res, "try-error")) {
-    #   if (attr(res, "condition")$message == "copula has not been fitted from data or its parameters have been modified manually") {
-    #     warning("vine not fitted using familiy_set 'all'. Trying 'onepar' instead.")
-    #     res <- rvinecopulib::vinecop(pseudo_obs, family_set = "onepar")
-    #     return(res)
-    #   }
-    #   stop("Error in vinecopulib::vinecop")
-    # } else {
-    #   return(rvinecopulib::vinecop(pseudo_obs))
-    # }
   }
   else {
     stop("Unknown copula model")
@@ -115,13 +143,15 @@ fit_copula <- function(error_obs, copula_model = "joe",
       optim.method = "L-BFGS-B"
     )
   } else{
-    fitted_vine_cop <- rvinecopulib::vinecop(pseudo_obs)
-    fiited_params <- copula::fitCopula(
+    fitted_params <- copula::fitCopula(
       copula_model,
       pseudo_obs,
-      method = "mpl",
+      method = copula_fit_method,
+      estimate.variance = FALSE,
       optim.control = list(factr = 1e8),
-      optim.method = "L-BFGS-B"
+      optim.method = "L-BFGS-B",
+      lower=lower,
+      upper=upper
     )
   }
   #fitted_param <- optim(alpha_start, loglikCopula, lower=lower, upper=upper,
@@ -522,7 +552,7 @@ target_q_support_to_independence_supports <- function(target_q_support, m_test_m
 
 widen_support <- function(support, overshoot, support_restriction=NULL) {
   # Expand the support by overshoot percent
-  checkmate::assert_subset(support_restriction, c("positive", "strict_positive", NULL))
+  checkmate::assert_subset(support_restriction, c("non_negative", "strict_positive", NULL))
   checkmate::assert_numeric(support, len=2, sorted=TRUE)
   checkmate::assert_numeric(overshoot, lower=0)
   support_width <- support[2] - support[1]
@@ -537,9 +567,9 @@ widen_support <- function(support, overshoot, support_restriction=NULL) {
     if (new_support[1] <= 0) {
       new_support[1] <- support[1] * (1-overshoot)
     }
-  } else if (support_restriction == "positive") {
+  } else if (support_restriction == "non_negative") {
     if (support[1] < 0) {
-      stop("Support is negative. Cannot widen support with 'positive' restriction.")
+      stop("Support is negative. Cannot widen support with 'non_negative' restriction.")
     }
     if (new_support[1] < 0) {
       new_support[1] <- 0
@@ -554,7 +584,7 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
                                            decoupler = NULL,
                                            vine_fit_settings = list(),
                                            error_estimation_settings=list(),
-                                           q_support_restriction='positive') {
+                                           q_support_restriction=NULL) {
   if (is.null(decoupler)) {
     decoupler <- get_ratio_error_metric()
   }
@@ -644,11 +674,11 @@ fit_and_construct_posterior <- function(training_estimates, training_realization
                                                  error_metric = NULL,
                                         vine_fit_settings = list(),
                                         error_estimation_settings=list(),
-                                        q_support_restriction='positive') {
+                                        q_support_restriction=NULL) {
   if (is.null(error_metric)) {
     error_metric <- get_ratio_error_metric()
   }
-  checkmate::assert_subset(q_support_restriction, c("positive", "strict_positive", NULL))
+  checkmate::assert_subset(q_support_restriction, c("non_negative", "strict_positive", NULL))
   checkmate::assert_array(training_estimates, "numeric", d=3)
   checkmate::assert_numeric(training_realizations)
   checkmate::assert_matrix(test_matrix, "numeric")
@@ -760,7 +790,6 @@ construct_posterior_margins <- function(margin_distributions, decoupler, m_matri
   )
 
 }
-
 
 copula_fit_and_predict_JC_assumption <- function(training_set,
                                                  test_set,
@@ -954,28 +983,47 @@ study_test_performance <- function(study_data, sim_params = NULL) {
       training_realizaitons <- training_set |> study_df_to_realizations()
       test_matrix <- test_set |> study_df_single_question_to_assessment_matrix(p$summarizing_function$f, p$k_percentiles)
       if (is(p$error_metric, "decoupler")) {
-        res <- fit_and_construct_posterior_indep(
+        res <- tryCatch( {
+         fit_and_construct_posterior_indep(
           training_estimates,
           training_realizaitons,
           test_matrix,
           p$copula_model,
           p$error_metric,
           vine_fit_settings = p$vine_fit_settings,
-          error_estimation_settings = p$error_estimation_settings
+          error_estimation_settings = p$error_estimation_settings,
+          q_support_restriction = p$q_support_restriction
+        )
+        }, error = \(e) {
+          list(
+          posterior = NULL,
+          warning = c("ERROR_IN_FIT", e$message)
+          )
+        }
         )
       } else {
-        res <- fit_and_construct_posterior(
+        res <- tryCatch( {
+        fit_and_construct_posterior(
           training_estimates,
           training_realizaitons,
           test_matrix,
           p$copula_model,
           p$error_metric,
-          vine_fit_settings = p$vine_fit_settings
+          vine_fit_settings = p$vine_fit_settings,
+          error_estimation_settings = p$error_estimation_settings,
+          q_support_restriction = p$q_support_restriction
+        )
+        }, error = \(e) {
+          list(
+            posterior = NULL,
+            warning = c("ERROR_IN_FIT", e$message)
+          )
+        }
         )
       }
       posterior <- res$posterior
       warnings <- append(warnings, res$warning)
-    } else if (p$prediction_method == "copula_assumption") {
+    } else if (p$prediction_method == "perfect_expert") {
       res <- copula_fit_and_predict_JC_assumption(
         training_set,
         test_set,
@@ -1025,12 +1073,13 @@ study_test_performance <- function(study_data, sim_params = NULL) {
 default_simulation_params <- function(copula_model = "joe",
                                       k_percentiles = c(5, 50, 95),
                                       interpolation = "linear",
-                                      prediction_method = "copula_assumption",
+                                      prediction_method = "perfect_expert",
                                       rejection_threshold = 0.05,
                                       summarizing_function = NULL,
                                       error_metric = NULL,
                                       error_estimation_settings = list(),
-                                      vine_fit_settings=list()) {
+                                      vine_fit_settings=list(),
+                                      q_support_restriction=NULL) {
   if (is.null(summarizing_function)) {
     summarizing_function <- get_three_quantiles_summarizing_function()
   }
@@ -1046,7 +1095,8 @@ default_simulation_params <- function(copula_model = "joe",
     summarizing_function = summarizing_function,
     error_metric = error_metric,
     vine_fit_settings = vine_fit_settings,
-    error_estimation_settings=error_estimation_settings
+    error_estimation_settings=error_estimation_settings,
+    q_support_restriction=q_support_restriction
   )
   class(params) <- "simulation_parameters"
   params

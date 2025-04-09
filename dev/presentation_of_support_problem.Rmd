@@ -27,11 +27,11 @@ res <- fit_and_construct_posterior_indep(
         training_assessments,
         training_set |> study_df_to_realizations(),
         test_m_matrix,
-        "indep",
+        "vine",
         cdf_metric,
         vine_fit_settings = list(),
         error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=0.1),
-        q_support_restriction = "positive"
+        q_support_restriction = "non_negative"
       )
 
 error_margins <- res$error_margins |> 
@@ -86,17 +86,16 @@ integrate(function(x) exp(log_posterior(x)), support[1], 100, subdivisions = 100
 samples <- sample_log_unnormalized_density(
   log_posterior,
   support,
-  1000
+  10000
 )
 ```
 ```{r}
 median(samples)
+sd(samples)
 ```
 
 ```{r}
-samp_small <- samples[samples < 1000]
-plot(density(samples))
-plot(density(samp_small))
+
 
 ```
 
@@ -211,25 +210,42 @@ q_marginals_f$cdfs(45) |> rvinecopulib::dvinecop(res$error_copula)
 
 # Example 2 : Linear error 
 ```{r}
-study <- filter_study_keep_ids(studies, 16)[[1]]
-test_question_id <- 2
+study <- filter_study_keep_ids(studies, 45)[[1]]
+test_question_id <- 11
 test_set <- study |> filter(question_id == test_question_id)
 training_set <- study |> filter(question_id != test_question_id)
-test_m_matrix <- test_set |> study_df_single_question_to_assessment_matrix(summ_fun, k_percentiles)
-training_assessments <- training_set |> study_df_to_assessment_array(summ_fun, k_percentiles)
-error_metric <- get_linear_error_metric()
+summ_fun = get_median_summarizing_function()
+#summ_fun = get_three_quantiles_summarizing_function()
+test_m_matrix <- test_set |> study_df_single_question_to_assessment_matrix(summ_fun$f, k_percentiles)
+training_assessments <- training_set |> study_df_to_assessment_array( summ_fun$f, k_percentiles)
+#error_metric <- get_linear_error_metric()
+error_metric <- get_linear_decoupler()
+#error_metric <- get_CDF_decoupler()
 
-res <- fit_and_construct_posterior(
+p <- default_simulation_params(copula_model = "indep", prediction_method = "copula",
+                              error_metric =  get_linear_decoupler(), summarizing_function = get_median_summarizing_function(),
+                q_support_restriction = 'non_negative'
+              )
+
+res <- fit_and_construct_posterior_indep(
         training_assessments,
         training_set |> study_df_to_realizations(),
         test_m_matrix,
         "vine",
         error_metric,
-        vine_fit_settings = list(),
-        error_estimation_settings = list(out_of_boundary="clamp"),
-        q_not_cross_zero = FALSE
+        vine_fit_settings = list(threshold = 0.7, family_set=c("gaussian", "indep")),
+        error_estimation_settings = list(),
+        q_support_restriction = "non_negative"
       )
 ```
+
+
+```{r}
+x <- seq(res$posterior$support[1], res$posterior$support[2], length.out = 1000)
+y <- res$posterior$logDM(x)
+plot(x,exp(y))
+```
+
 
 
 ```{r}
@@ -254,4 +270,24 @@ res$errors[,expert_id,, drop=FALSE] |> plot_3d_errors()
 res$errors[,expert_id,, drop=FALSE] |> 
   plot_3d_errors()  |> plot_add_supports(exp_error_margins) + xlim(-1,2)
 ```
+
+```{r}
+
+```
+```{r}
+```
+
+
+```{r}
+samples <- sample_log_unnormalized_density(res$posterior$logDM, res$posterior$support, 1000)
+```
+```{r}
+median(samples)
+```
+```{r}
+plot(density(samples))
+```
+
+
+
 

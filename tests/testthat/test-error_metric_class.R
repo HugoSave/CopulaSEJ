@@ -53,6 +53,15 @@ test_error_metric <- function(e_metric) {
   expect_equal(err_inv, matrix(q, nrow=length(q), ncol=ncol(m_all)))
 }
 
+test_that("decoupler linear error metric is correct", {
+  m_test = matrix(c(1,2,3,4), nrow=2, ncol=2, byrow=FALSE)
+  q = c(1, 2)
+  expected_out = array(NA, dim=c(2,2,2))
+  expected_out[1,,] = q[1] - m_test
+  expected_out[2,,] = q[2] - m_test
+  expect_equal(decoupler_linear(q, m_test), expected_out)
+})
+
 test_that("dimensions of linear error metric are correct", {
   test_error_metric(get_linear_error_metric())
 })
