@@ -15,5 +15,7 @@ calculate_marginal_posteriors(error_margins, m_matrix_observed, error_metric)
 \item{error_metric}{Error metric of S3 class "error_metric"}
 }
 \description{
-$f_{Q\mid M_i^e = \dot{m_i^e}}(q) \propto f_{M_i^e \mid Q=q}(\dot{m_i^e} \mid q)$
+\deqn{
+f_{Q\mid M_i^e = \dot{m_i^e}}(q) \propto f_{M_i^e \mid Q=q}(\dot{m_i^e} \mid q)
+}
 }

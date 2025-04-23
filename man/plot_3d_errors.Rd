@@ -4,7 +4,7 @@
 \alias{plot_3d_errors}
 \title{Title}
 \usage{
-plot_3d_errors(errors)
+plot_3d_errors(errors, x_lab = "Decoupler Value")
 }
 \arguments{
 \item{errors}{NxExD array with the errors}

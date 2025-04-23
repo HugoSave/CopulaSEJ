@@ -3,22 +3,24 @@
 #' @param name Descriptive name of summarizing function
 #' @param f Function that takes a nx3 matrix of assessments and returns a nxd matrix
 #' @param output_dim The d dimension of the summarizing function
+#' @param short_name Short name of the summarizing function. Should have no spaces and be filesystem friendly.
 #'
 #'
-new_summarizing_function <- function(f, name="", output_dim=NULL) {
+new_summarizing_function <- function(f, name="", output_dim=NULL, short_name="") {
   # check that arguments are functions
   stopifnot(is.function(f))
   stopifnot(is.character(name))
+  stopifnot(is.character(short_name))
   stopifnot((is.numeric(output_dim) && length(output_dim) == 1) || is.null(output_dim))
-  return(structure(list(name=name, f = f, output_dim=output_dim), class = "summarizing_function"))
+  return(structure(list(name=name, f = f, output_dim=output_dim, short_name=short_name), class = "summarizing_function"))
 }
 
 get_median_summarizing_function <- function() {
-  return(new_summarizing_function(m_median, "median", 1))
+  return(new_summarizing_function(m_median, "median", 1, "M"))
 }
 
 get_three_quantiles_summarizing_function <- function() {
-  return(new_summarizing_function(m_three_quantiles, "three quantiles", 3))
+  return(new_summarizing_function(m_three_quantiles, "three quantiles", 3, "3Q"))
 }
 
 #' Extracts the median from a set of assessments

@@ -257,11 +257,6 @@ find_median_of_fun <- function(fun, support) {
   median_guess
 }
 
-k_percentiles_to_colname <- function(k_percentiles) {
-  # assert that we have a numeric vector with integers
-  checkmate::assert_integerish(k_percentiles)
-  paste0(k_percentiles, "th percentile")
-}
 
 single_expert_predict <- function(test_set, expert_id) {
   # For a single expert predict the median
@@ -578,16 +573,34 @@ widen_support <- function(support, overshoot, support_restriction=NULL) {
   new_support
 }
 
+#' Title
+#'
+#' @param training_estimates
+#' @param training_realizations
+#' @param test_matrix
+#' @param decoupler
+#' @param copula_model
+#' @param vine_fit_settings List of arguments to pass to the `fit_copula` function together with the copula_model argument.
+#' @param error_estimation_settings List of arguments to pass to the `estimate_margins` function
+#' @param q_support_restriction
+#' @param rejection_threshold
+#' @param rejection_test
+#'
+#' @returns
+#' @export
+#'
+#' @examples
 fit_and_construct_posterior_indep <- function(training_estimates, training_realizations,
                                            test_matrix,
+                                           decoupler,
                                            copula_model = "joe",
-                                           decoupler = NULL,
                                            vine_fit_settings = list(),
                                            error_estimation_settings=list(),
-                                           q_support_restriction=NULL) {
-  if (is.null(decoupler)) {
-    decoupler <- get_ratio_error_metric()
-  }
+                                           q_support_restriction=NULL,
+                                           q_support_overshoot=0.1,
+                                           rejection_threshold=NULL,
+                                           rejection_min_experts=3,
+                                           rejection_test="distance_correlation") {
   checkmate::assert_array(training_estimates, "numeric", d=3)
   checkmate::assert_numeric(training_realizations)
   checkmate::assert_matrix(test_matrix, "numeric")
@@ -595,6 +608,11 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
   checkmate::assert_string(copula_model)
   checkmate::assert_list(vine_fit_settings)
   checkmate::assert_list(error_estimation_settings)
+  checkmate::assert_subset(q_support_restriction, c("non_negative", "strict_positive", NULL))
+  checkmate::assert_number(q_support_overshoot, lower=0, finite=TRUE)
+  checkmate::assert_number(rejection_threshold, null.ok=TRUE, lower=0, upper=1)
+  checkmate::assert_count(rejection_min_experts, positive=TRUE)
+  checkmate::assert_subset(rejection_test, c("kruskal", "classical_calibration", "distance_correlation"))
 
   # TODO implement a domain check prior?
   # domain_check <- decoupler$check_domain(abind::abind(training_estimates,
@@ -605,12 +623,19 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
   D = ncol(test_matrix)
   training_dim <- dim(training_estimates)
   checkmate::assert_set_equal(training_dim, c(length(training_realizations), E, D), ordered=TRUE)
-  n <- training_dim[1]
-  res <- checkmate::check_number(n, lower=10)
+  res <- checkmate::check_number(training_dim[1], lower=10)
   if (is.character(res)) {
-    checkmate::makeAssertion(n, "Number of training samples must be at least 10. This comes from a hard coded limit in the rvinecopula (and vineCopula) package.",
-                             "dim(training_estimates)[1]",
-                             NULL)
+    stop("Number of training samples ('dim(training_estimates)[1]') must be at least 10. This comes from a hard coded limit in the rvinecopula (and vineCopula) package.")
+  }
+
+  if (!is.null(rejection_threshold)) {
+    rejection_results <- reject_experts(training_estimates, training_realizations, rejection_threshold, test=rejection_test,
+                   decoupler=decoupler, min_nr_experts=rejection_min_experts)
+    if (length(rejection_results$accepted_experts) == 0) {
+      stop("No experts accepted. Please check the rejection threshold or set rejection_min_experts > 0.")
+    }
+    training_estimates <- rejection_results$accepted_estimates
+    test_matrix <- test_matrix[rejection_results$accepted_experts,, drop=FALSE]
   }
 
   warning=NULL
@@ -619,40 +644,40 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
     warining=c("ONE_EXPERT")
   }
 
-  errors <- assessment_array_to_indep_obs(training_estimates, training_realizations, decoupler$f)
-  D_tilde = dim(errors)[3]
-  flattened_errors <- flatten_3d_array_to_matrix(errors)
+  decouple_values <- assessment_array_to_indep_obs(training_estimates, training_realizations, decoupler$f)
+  decouple_flattened <- flatten_3d_array_to_matrix(decouple_values)
 
   target_q_support <- target_q_support_from_test_assessments(test_matrix)
 
-  #errors_min_max <- get_error_margins_min_max(flattened_errors) # per dimension
-  #target_q_support <- find_target_q_support(errors_min_max, test_matrix, decoupler)
+  widend_support <- widen_support(target_q_support, q_support_overshoot,  support_restriction=q_support_restriction)
 
-  target_q_support <- widen_support(target_q_support, 0.1,  support_restriction=q_support_restriction)
-
-  target_indep_supports <- target_q_support_to_independence_supports(target_q_support, test_matrix, decoupler)
+  decoupler_support <- target_q_support_to_independence_supports(widend_support, test_matrix, decoupler)
 
   # inject here allows us to pass the arg=value pairs of the list as arguments
-  margin_distributions <- rlang::inject(estimate_margins(flattened_errors, target_indep_supports, !!!error_estimation_settings))
+  margin_distributions <- rlang::inject(estimate_margins(decouple_flattened, decoupler_support, !!!error_estimation_settings))
+  D_tilde = dim(decouple_values)[3]
   margin_distributions <- add_d_e_to_list(margin_distributions, D_tilde)
 
-  error_copula <- rlang::inject(fit_copula(flattened_errors, copula_model, !!!vine_fit_settings))
+  error_copula <- rlang::inject(fit_copula(decouple_flattened, copula_model, !!!vine_fit_settings))
 
   posterior<-create_log_unnormalized_posterior_indep(error_copula,
                                                margin_distributions,
                                                decoupler,
                                                test_matrix,
                                                support=target_q_support)
-  list(
+  ret <- list(
     posterior = posterior,
     warning = warning,
-    flattened_errors=flattened_errors,
-    errors=errors,
+    flattened_errors=decouple_flattened,
+    errors=decouple_values,
     error_copula=error_copula,
     error_margins=margin_distributions
   )
+  if (exists("rejection_results")) {
+    ret$accepted_experts <- rejection_results$accepted_experts
+  }
+  ret
 }
-
 
 #' Title
 #'
@@ -734,7 +759,7 @@ fit_and_construct_posterior <- function(training_estimates, training_realization
                                     margin_distributions,
                                     error_metric,
                                     test_matrix,
-                                    support=target_q_support)
+                                    target_q_support)
   list(
     posterior = posterior,
     warning = warning,
@@ -847,13 +872,13 @@ copula_calibration_rejection_fit_and_predict <- function(training_set,
   # First reject experts with low calibration score then perform the copula method on the remaining experts
   quantile_cols <- k_percentiles_to_colname(c(5, 50, 95))
   assesment_data <- training_set[c(quantile_cols, "realization")] # the first three columns has to be the quantiles
-  cal_scores <- training_set |> group_by(expert_id) |> summarise(calibration_score = {
+  cal_scores <- training_set |> dplyr::group_by(expert_id) |> dplyr::summarise(calibration_score = {
     group_data = assesment_data[cur_group_rows(), ]
     realisations = group_data$realization
     calculateCalibrationScoreForExpert(group_data, realisations)
   })
   # Reject experts with low calibration score
-  accepted_experts <- cal_scores |> filter(calibration_score >= alpha) |> pull(expert_id)
+  accepted_experts <- cal_scores |> dplyr::filter(calibration_score >= alpha) |> dplyr::pull(expert_id)
   # assert at least one expert is calirated
   below_alpha_warning <- NULL
   if (length(accepted_experts) == 0) {
@@ -861,8 +886,6 @@ copula_calibration_rejection_fit_and_predict <- function(training_set,
     # select the expert with highest cal_score
     accepted_experts <- cal_scores |> arrange(desc(calibration_score)) |> head(1) |> pull(expert_id)
   }
-
-
 
   filtered_training <- training_set |> filter(expert_id %in% accepted_experts)
   filtered_test <- test_set |> filter(expert_id %in% accepted_experts)
@@ -966,11 +989,14 @@ study_test_performance <- function(study_data, sim_params = NULL) {
     prediction = vector(mode = "numeric"),
     realization = vector(mode = "numeric"),
     test_question = vector(mode = "numeric"),
-    posterior = list()
+    posterior = list(),
+    accepted_experts = vector(mode = "numeric"),
+    experts = vector(mode = "numeric")
   )
   warnings <- c()
   single_expert_warning <- FALSE
   below_alpha_warning <- FALSE
+  total_nr_experts <- length(unique(study_data$expert_id))
 
   for (i in seq(nrow(fold_combinations))) {
     test_set = fold_combinations$test[[i]]
@@ -978,23 +1004,26 @@ study_test_performance <- function(study_data, sim_params = NULL) {
 
     posterior = NULL
     prediction = NA
+    nr_experts <- total_nr_experts
     if (p$prediction_method == "copula") {
-      training_estimates <-  training_set |> study_df_to_assessment_array(p$summarizing_function$f, p$k_percentiles)
-      training_realizaitons <- training_set |> study_df_to_realizations()
-      test_matrix <- test_set |> study_df_single_question_to_assessment_matrix(p$summarizing_function$f, p$k_percentiles)
+      arr_format <- df_format_to_array_format(training_set, test_set, p$summarizing_function$f, p$k_percentiles)
       if (is(p$error_metric, "decoupler")) {
         res <- tryCatch( {
          fit_and_construct_posterior_indep(
-          training_estimates,
-          training_realizaitons,
-          test_matrix,
-          p$copula_model,
+          arr_format$training_summaries,
+          arr_format$training_realizations,
+          arr_format$test_summaries,
           p$error_metric,
+          p$copula_model,
           vine_fit_settings = p$vine_fit_settings,
           error_estimation_settings = p$error_estimation_settings,
-          q_support_restriction = p$q_support_restriction
+          q_support_restriction = p$q_support_restriction,
+          rejection_test = p$rejection_test,
+          rejection_threshold = p$rejection_threshold,
+          rejection_min_experts = p$rejection_min_experts
         )
         }, error = \(e) {
+          warning(e)
           list(
           posterior = NULL,
           warning = c("ERROR_IN_FIT", e$message)
@@ -1004,9 +1033,9 @@ study_test_performance <- function(study_data, sim_params = NULL) {
       } else {
         res <- tryCatch( {
         fit_and_construct_posterior(
-          training_estimates,
-          training_realizaitons,
-          test_matrix,
+          arr_format$training_summaries,
+          arr_format$training_realizations,
+          arr_format$test_summaries,
           p$copula_model,
           p$error_metric,
           vine_fit_settings = p$vine_fit_settings,
@@ -1014,6 +1043,7 @@ study_test_performance <- function(study_data, sim_params = NULL) {
           q_support_restriction = p$q_support_restriction
         )
         }, error = \(e) {
+          warning(e)
           list(
             posterior = NULL,
             warning = c("ERROR_IN_FIT", e$message)
@@ -1023,6 +1053,7 @@ study_test_performance <- function(study_data, sim_params = NULL) {
       }
       posterior <- res$posterior
       warnings <- append(warnings, res$warning)
+      nr_experts <- dim(res$errors)[2]
     } else if (p$prediction_method == "perfect_expert") {
       res <- copula_fit_and_predict_JC_assumption(
         training_set,
@@ -1035,18 +1066,6 @@ study_test_performance <- function(study_data, sim_params = NULL) {
       posterior <- res$posterior
     } else if (p$prediction_method == "median_average") {
       prediction <- median_average_predict(test_set)
-    } else if (p$prediction_method == "copula_calibration") {
-      prediction_obj <- copula_calibration_rejection_fit_and_predict(
-        training_set,
-        test_set,
-        p$rejection_threshold,
-        p$copula_model,
-        p$interpolation,
-        p$dep_error_metric,
-        p$summarizing_function
-      )
-      warnings <- append(warnings, prediction_obj$warning)
-      prediction <- prediction_obj$prediction
     } else if (p$prediction_method == "equal_weights") {
       prediction <- equal_weight_predict(test_set)
     } else if (p$prediction_method == "global_opt") {
@@ -1062,6 +1081,8 @@ study_test_performance <- function(study_data, sim_params = NULL) {
     stats$realization[[i]] <- realization
     stats$test_question[[i]] <- test_question
     stats$posterior[[i]] <- posterior
+    stats$accepted_experts[[i]] <- nr_experts
+    stats$experts[[i]] <- total_nr_experts
   }
 
   # convert to tibble
@@ -1070,28 +1091,78 @@ study_test_performance <- function(study_data, sim_params = NULL) {
   list(stats = stats, warnings = unique(warnings))
 }
 
+new_simulation_params <- function(copula_model,
+                                      k_percentiles,
+                                      interpolation,
+                                      prediction_method,
+                                      rejection_test = "distance_correlation",
+                                      rejection_min_experts=1,
+                                      rejection_threshold,
+                                      summarizing_function,
+                                      error_metric = NULL,
+                                      error_estimation_settings = list(),
+                                      vine_fit_settings=list(),
+                                      q_support_restriction=NULL) {
+  structure(list(
+    copula_model = copula_model,
+    k_percentiles = k_percentiles,
+    interpolation = interpolation,
+    prediction_method = prediction_method,
+    rejection_test = rejection_test,
+    rejection_threshold = rejection_threshold,
+    rejection_min_experts=rejection_min_experts,
+    summarizing_function = summarizing_function,
+    error_metric = error_metric,
+    vine_fit_settings = vine_fit_settings,
+    error_estimation_settings=error_estimation_settings,
+    q_support_restriction=q_support_restriction
+  ), class="simulation_parameters")
+}
+
 default_simulation_params <- function(copula_model = "joe",
                                       k_percentiles = c(5, 50, 95),
                                       interpolation = "linear",
                                       prediction_method = "perfect_expert",
+                                      rejection_test = "distance_correlation",
+                                      rejection_min_experts = 1,
                                       rejection_threshold = 0.05,
                                       summarizing_function = NULL,
                                       error_metric = NULL,
                                       error_estimation_settings = list(),
                                       vine_fit_settings=list(),
                                       q_support_restriction=NULL) {
+  checkmate::assert_string(copula_model)
+  checkmate::assert_numeric(k_percentiles, sorted=TRUE, lower=0, upper=100)
+  checkmate::assert_string(interpolation)
+  checkmate::assert_string(prediction_method)
+  checkmate::assert_subset(rejection_test, c("kruskal", "classical_calibration", "distance_correlation"))
+  checkmate::assert_count(rejection_min_experts)
+  checkmate::assert_number(rejection_threshold, null.ok=TRUE, lower=0, upper=1) # if NULL then no rejection happens
+  checkmate::assert_class(summarizing_function, "summarizing_function", null.ok=TRUE)
+  checkmate::assert(
+    checkmate::check_class(error_metric, "decoupler", null.ok=TRUE),
+    checkmate::check_class(error_metric, "error_metric", null.ok=TRUE)
+  )
+  checkmate::assert_list(error_estimation_settings)
+  checkmate::assert_list(vine_fit_settings)
+  checkmate::assert_string(q_support_restriction, null.ok=TRUE)
+
+
+
   if (is.null(summarizing_function)) {
     summarizing_function <- get_three_quantiles_summarizing_function()
   }
   if (is.null(error_metric)) {
-    error_metric <- get_ratio_error_metric()
+    error_metric <- get_CDF_decoupler()
   }
   params <- list(
     copula_model = copula_model,
     k_percentiles = k_percentiles,
     interpolation = interpolation,
     prediction_method = prediction_method,
+    rejection_test = rejection_test,
     rejection_threshold = rejection_threshold,
+    rejection_min_experts=rejection_min_experts,
     summarizing_function = summarizing_function,
     error_metric = error_metric,
     vine_fit_settings = vine_fit_settings,
@@ -1102,25 +1173,6 @@ default_simulation_params <- function(copula_model = "joe",
   params
 }
 
-run_analysis_per_study <- function(study_list, simulation_params = NULL) {
-  if (is.null(simulation_params)) {
-    simulation_params <- default_simulation_params()
-  }
-  warnings <- list()
-  results <- list()
-  for (i in seq_along(study_list)) {
-    study_id <- unique(study_list[[i]]$study_id) |> head(1)
-    print(paste("Running study:", study_id))
-    study_data <- study_list[[i]]
-    study_result <- study_test_performance(study_data, simulation_params)
-    warnings[[i]] <- study_result$warnings
-
-    study_result$stats["study_id"] <- study_id
-    results[[i]] <- study_result$stats
-  }
-  list(results = dplyr::bind_rows(results),
-       warnings = warnings)
-}
 
 
 plot_supports <- function(list_supports) {
@@ -1151,7 +1203,7 @@ plot_add_supports <- function(p, list_supports) {
 #' @export
 #'
 #' @examples
-plot_3d_errors <- function(errors) {
+plot_3d_errors <- function(errors, x_lab="Decoupler Value") {
   dims <- dim(errors)
   q_names <- dimnames(errors)[[1]]
   q_names <- if (is.null(q_names)) seq(dims[1]) else q_names
@@ -1173,7 +1225,7 @@ plot_3d_errors <- function(errors) {
 
   #print(glue::glue("Plotting for questions {paste0(q_names, collapse=', ')}"))
   p<-df |> ggplot2::ggplot(ggplot2::aes(x=error, y=e, color=d)) +
-    ggplot2::geom_point(alpha=0.9) + ggplot2::labs(x="Error", y="Expert ID", color="Error dimension")
+    ggplot2::geom_point(alpha=0.9) + ggplot2::labs(x=x_lab, y="Expert ID", color="Error dimension")
   p
 }
 

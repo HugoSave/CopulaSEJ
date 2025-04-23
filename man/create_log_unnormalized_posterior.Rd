@@ -4,7 +4,13 @@
 \alias{create_log_unnormalized_posterior}
 \title{Title}
 \usage{
-create_log_unnormalized_posterior(error_copula, error_margins, error_metric, m)
+create_log_unnormalized_posterior(
+  error_copula,
+  error_margins,
+  error_metric,
+  m,
+  support = NULL
+)
 }
 \arguments{
 \item{error_copula}{Already fitted error copula}

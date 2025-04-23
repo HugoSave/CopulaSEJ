@@ -82,7 +82,7 @@ test_that("d_E_to_linear_index works", {
   expect_equal(d_E_to_linear_index(1,1, 3), 1)
 })
 
-test_that("study_df_to_assessment_array works with 3 quantiles", {
+test_that("study_df_to_summary_array works with 3 quantiles", {
   training_set <- get_scrambled_training_data()
   q_vals <- unique(training_set$question_id) |> sort()
   e_vals <- unique(training_set$expert_id) |> sort()
@@ -94,11 +94,11 @@ test_that("study_df_to_assessment_array works with 3 quantiles", {
     }
   }
 
-  output <- study_df_to_assessment_array(training_set, m_three_quantiles, c(5, 50, 95))
+  output <- study_df_to_summary_array(training_set, m_three_quantiles, c(5, 50, 95))
   expect_equal(output, expected_out)
 })
 
-test_that("study_df_to_assessment_array works with median", {
+test_that("study_df_to_summary_array works with median", {
   training_set <- get_scrambled_training_data()
   q_vals <- unique(training_set$question_id) |> sort()
   e_vals <- unique(training_set$expert_id) |> sort()
@@ -110,24 +110,24 @@ test_that("study_df_to_assessment_array works with median", {
     }
   }
 
-  output <- study_df_to_assessment_array(training_set, m_median, c(5, 50, 95))
+  output <- study_df_to_summary_array(training_set, m_median, c(5, 50, 95))
   expect_equal(output, expected_out)
 })
 
 
-test_that("study_df_single_question_to_assessment_matrix returns right dims with 3 quantiles", {
+test_that("study_df_single_question_to_summary_matrix returns right dims with 3 quantiles", {
   test_set <- get_test_data()
   E <- length(unique(test_set$expert_id))
   d <- 3
-  output <- study_df_single_question_to_assessment_matrix(test_set, m_three_quantiles, c(5, 50, 95))
+  output <- study_df_single_question_to_summary_matrix(test_set, m_three_quantiles, c(5, 50, 95))
   expect_equal(dim(output), c(E,d))
 })
 
-test_that("study_df_single_question_to_assessment_matrix returns right dims with median", {
+test_that("study_df_single_question_to_summary_matrix returns right dims with median", {
   test_set <- get_test_data()
   E <- length(unique(test_set$expert_id))
   d <- 1
-  output <- study_df_single_question_to_assessment_matrix(test_set, m_median, c(5, 50, 95))
+  output <- study_df_single_question_to_summary_matrix(test_set, m_median, c(5, 50, 95))
   expect_equal(dim(output), c(E,d))
 })
 

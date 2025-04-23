@@ -93,12 +93,11 @@ print(paste("Naive mean estimate:", naive_mean_estimate))
 # Look at error distributions
 ```{r, fig.height=12}
 k_percentiles <- c(5,50,95)
-test_m_matrix <- test_set |> study_df_single_question_to_assessment_matrix(summarizing_function$f, k_percentiles)
-training_assessments <- training_set |> study_df_to_assessment_array(summarizing_function$f, k_percentiles)
+array_format <- df_format_to_array_format(training_set, test_set, summarizing_function$f, k_percentiles)
 res <- fit_and_construct_posterior(
-        training_assessments,
-        training_set |> study_df_to_realizations(),
-        test_m_matrix,
+        array_format$training_summaries,
+        array_format$training_realizations,
+        array_format$test_summaries,
         "vine",
         error_metric,
         vine_fit_settings = list(),

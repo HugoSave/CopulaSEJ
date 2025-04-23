@@ -9,7 +9,8 @@ estimate_margins(
   supports = NULL,
   method = "beta",
   overshoot = 0.1,
-  out_of_boundary = "clamp"
+  out_of_boundary = "clamp",
+  bw = "SJ"
 )
 }
 \arguments{

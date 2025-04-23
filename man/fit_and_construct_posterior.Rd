@@ -12,7 +12,7 @@ fit_and_construct_posterior(
   error_metric = NULL,
   vine_fit_settings = list(),
   error_estimation_settings = list(),
-  q_not_cross_zero = TRUE
+  q_support_restriction = NULL
 )
 }
 \arguments{

@@ -54,6 +54,9 @@ results_df <- dplyr::bind_rows(results)
 results_df<-readRDS("output/compare_errors_and_summarizers_simulation.rds")$results_df
 #results_df <- readRDS("output/performance_comparison.rds")
 
+# results_df <- get_simulation_group_files(rel_dev=TRUE) |> load_files() |> combine_simulation_results()
+# results_df <- results_df$results
+
 pos_values <- results_df |> filter(realization>0 & prediction>0) |> 
   ggplot(aes(realization, prediction, color=prediction_method)) +
   geom_point() +
@@ -160,12 +163,12 @@ neg_log_lik_per_study
 ### Point results all samples
 ```{r}
 
-results_df |> filter(realization!=0) |> group_by(prediction_method) |> summarise(MAPE = mean(abs(rel_error)), RMSPE = mean(rel_error^2), MAXPE = max(abs(rel_error)), MNLL=median(neg_log_lik), MedAPE = median(abs(rel_error)))
+results_df |> filter(realization!=0 & !is.na(rel_error)) |> group_by(prediction_method) |> summarise(MAPE = mean(abs(rel_error)),MedAPE = median(abs(rel_error)), RMSPE = sqrt(mean(rel_error^2)), MAXPE = max(abs(rel_error)), MedNLL=median(neg_log_lik))
 
 ```
 ### Point results rel_error less than 10
 ```{r}
-results_df |> filter(realization!=0 & abs(rel_error) < 10) |> group_by(prediction_method) |> summarise(MAPE = mean(abs(rel_error)), RMSPE = mean(rel_error^2), MAXPE = max(abs(rel_error)))
+results_df |> filter(realization!=0 & abs(rel_error) < 10 &  !is.na(rel_error)) |> group_by(prediction_method) |>  summarise(MAPE = mean(abs(rel_error)),MedAPE = median(abs(rel_error)), RMSPE = sqrt(mean(rel_error^2)), MAXPE = max(abs(rel_error)), MedNLL=median(neg_log_lik))
 ```
 
 

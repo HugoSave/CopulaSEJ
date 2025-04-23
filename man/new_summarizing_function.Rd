@@ -4,7 +4,7 @@
 \alias{new_summarizing_function}
 \title{A class to hold a summarizing function}
 \usage{
-new_summarizing_function(f, name = "", output_dim = NULL)
+new_summarizing_function(f, name = "", output_dim = NULL, short_name = "")
 }
 \arguments{
 \item{f}{Function that takes a nx3 matrix of assessments and returns a nxd matrix}
@@ -12,6 +12,8 @@ new_summarizing_function(f, name = "", output_dim = NULL)
 \item{name}{Descriptive name of summarizing function}
 
 \item{output_dim}{The d dimension of the summarizing function}
+
+\item{short_name}{Short name of the summarizing function. Should have no spaces and be filesystem friendly.}
 }
 \description{
 A class to hold a summarizing function

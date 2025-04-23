@@ -136,3 +136,23 @@ get_study_statistics <- function(study) {
     )
   study_statistics
 }
+
+run_analysis_per_study <- function(study_list, simulation_params = NULL) {
+  if (is.null(simulation_params)) {
+    simulation_params <- default_simulation_params()
+  }
+  warnings <- list()
+  results <- list()
+  for (i in seq_along(study_list)) {
+    study_id <- unique(study_list[[i]]$study_id) |> head(1)
+    print(paste("Running study:", study_id))
+    study_data <- study_list[[i]]
+    study_result <- study_test_performance(study_data, simulation_params)
+    warnings[[i]] <- study_result$warnings
+
+    study_result$stats["study_id"] <- study_id
+    results[[i]] <- study_result$stats
+  }
+  list(results = dplyr::bind_rows(results),
+       warnings = warnings)
+}

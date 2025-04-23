@@ -18,19 +18,19 @@ study <- change_small_value_in_study_list(list(study), k_percentiles_to_colname(
 test_question_id <- 10
 test_set <- study |> filter(question_id == test_question_id)
 training_set <- study |> filter(question_id != test_question_id)
-test_m_matrix <- test_set |> study_df_single_question_to_assessment_matrix(summ_fun, k_percentiles)
-training_assessments <- training_set |> study_df_to_assessment_array(summ_fun, k_percentiles)
-cdf_metric <- get_CDF_decoupler(scale="linear")
+test_m_matrix <- test_set |> study_df_single_question_to_summary_matrix(summ_fun, k_percentiles)
+training_assessments <- training_set |> study_df_to_summary_array(summ_fun, k_percentiles)
+cdf_metric <- get_CDF_decoupler(scale="linear", support_restriction = "non_negative")
 ```
 ```{r}
 res <- fit_and_construct_posterior_indep(
         training_assessments,
         training_set |> study_df_to_realizations(),
         test_m_matrix,
-        "vine",
         cdf_metric,
+        "vine",
         vine_fit_settings = list(),
-        error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=0.1),
+        error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=1),
         q_support_restriction = "non_negative"
       )
 
@@ -52,7 +52,7 @@ plot(fit)
 ```
 
 ```{r}
-error_margins[6] |> plot_distributions("pdf&cdf")
+error_margins[6] |> plot_distributions("pdf")
 ```
 
 ```{r}
@@ -108,8 +108,8 @@ study <- filter_study_keep_ids(studies, 5)[[1]]
 test_question_id <- 1
 test_set <- study |> filter(question_id == test_question_id)
 training_set <- study |> filter(question_id != test_question_id)
-test_m_matrix <- test_set |> study_df_single_question_to_assessment_matrix(summ_fun, k_percentiles)
-training_assessments <- training_set |> study_df_to_assessment_array(summ_fun, k_percentiles)
+test_m_matrix <- test_set |> study_df_single_question_to_summary_matrix(summ_fun, k_percentiles)
+training_assessments <- training_set |> study_df_to_summary_array(summ_fun, k_percentiles)
 ratio_metric <- get_ratio_error_metric()
 ```
 ```{r}
@@ -216,8 +216,8 @@ test_set <- study |> filter(question_id == test_question_id)
 training_set <- study |> filter(question_id != test_question_id)
 summ_fun = get_median_summarizing_function()
 #summ_fun = get_three_quantiles_summarizing_function()
-test_m_matrix <- test_set |> study_df_single_question_to_assessment_matrix(summ_fun$f, k_percentiles)
-training_assessments <- training_set |> study_df_to_assessment_array( summ_fun$f, k_percentiles)
+test_m_matrix <- test_set |> study_df_single_question_to_summary_matrix(summ_fun$f, k_percentiles)
+training_assessments <- training_set |> study_df_to_summary_array( summ_fun$f, k_percentiles)
 #error_metric <- get_linear_error_metric()
 error_metric <- get_linear_decoupler()
 #error_metric <- get_CDF_decoupler()
@@ -231,8 +231,8 @@ res <- fit_and_construct_posterior_indep(
         training_assessments,
         training_set |> study_df_to_realizations(),
         test_m_matrix,
-        "vine",
         error_metric,
+        "vine",
         vine_fit_settings = list(threshold = 0.7, family_set=c("gaussian", "indep")),
         error_estimation_settings = list(),
         q_support_restriction = "non_negative"

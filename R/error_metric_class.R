@@ -1,6 +1,3 @@
-
-
-
 #' Constructor for error metric class.
 #'
 #' @param name name of the function
@@ -81,17 +78,20 @@ new_error_metric <- function(name,
   ))
 }
 
-new_decoupler <- function(name, f, f_prime_q, f_increasing, fix_m, f_inverse=NULL) {
+new_decoupler <- function(name, f, f_prime_q, f_increasing, fix_m, f_inverse=NULL, short_name=NULL) {
   checkmate::assert_string(name)
   checkmate::assert_function(f, args=c("q", "m"), ordered=TRUE)
   checkmate::assert_function(f_prime_q, args=c("q", "m"), ordered=TRUE)
   checkmate::assert_function(f_increasing, args=c("m"), ordered=TRUE)
   checkmate::assert_function(fix_m, args=c("m"), ordered=TRUE)
   checkmate::assert_function(f_inverse, args=c("z", "m"), null.ok=TRUE)
+  checkmate::assert_string(short_name, null.ok=TRUE)
+  short_name <- if (is.null(short_name)) name else short_name
 
   return(structure(
     list(
       name = name,
+      short_name=short_name,
       f = f,
       f_prime_q = f_prime_q,
       f_increasing=f_increasing,
@@ -657,47 +657,48 @@ get_linear_decoupler <- function() {
       f_prime_q=decoupler_linear_prime_q,
       f_increasing=decoupler_linear_increasing,
       fix_m = decoupler_linear_fix_m,
-      f_inverse=decoupler_linear_inverse
+      f_inverse=decoupler_linear_inverse,
+      short_name="lin"
     )
   )
 }
 
 
 ##### CDF error
-indep_CDF <- function(q, m, overshoot=0.1, k_percentiles=c(5,50,95), scale="linear"){
+indep_CDF <- function(q, m, overshoot=0.1, k_percentiles=c(5,50,95), scale="linear", support_restriction=NULL){
   # fit distributions to m. m should be a matrix with E rows and D columns
-  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles, scale)
+  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles, scale, support_restriction)
   ind_cond_m$f(q)
 }
 
-indep_CDF_prime_q <- function(q, m, overshoot=0.1, k_percentiles=c(5,50,95), scale="linear"){
+indep_CDF_prime_q <- function(q, m, overshoot=0.1, k_percentiles=c(5,50,95), scale="linear", support_restriction=NULL){
   # fit distributions to m. m should be a matrix with E rows and D columns
-  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles, scale)
+  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles, scale, support_restriction)
   ind_cond_m$f_prime_q(q)
 }
 
-indep_CDF_increasing <- function(m, overshoot=0.1, k_percentiles=c(5,50,95)){
+indep_CDF_increasing <- function(m){
   # fit distributions to m. m should be a matrix with E rows and D columns
-  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles)
-  ind_cond_m$f_increasing()
+  is_increasing_matrix <- matrix(TRUE, nrow=nrow(m), ncol=1)
 }
 
-decouple_CDF_inverse <- function(z, m, overshoot=0.1, k_percentiles=c(5,50,95), scale="linear"){
+decouple_CDF_inverse <- function(z, m, overshoot=0.1, k_percentiles=c(5,50,95), scale="linear", support_restriction=NULL){
   # fit distributions to m. m should be a matrix with E rows and D columns
-  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles, scale)
+  ind_cond_m <- get_cdf_indep_function_fix_m(m, overshoot, k_percentiles, scale, support_restriction)
   ind_cond_m$f_inverse(z)
 }
 
 
-get_CDF_decoupler <- function(scale="linear") {
+get_CDF_decoupler <- function(scale="linear", overshoot=0.1, k_percentiles=c(5,50,95), support_restriction=NULL) {
   return(
     new_decoupler(
       name="CDF",
-      f=\(q,m) indep_CDF(q, m, scale=scale),
-      f_prime_q=\(q,m) indep_CDF_prime_q(q, m, scale=scale),
+      f=\(q,m) indep_CDF(q, m, overshoot=overshoot, k_percentiles=k_percentiles, scale=scale, support_restriction=support_restriction),
+      f_prime_q=\(q,m) indep_CDF_prime_q(q, m, overshoot=overshoot, k_percentiles=k_percentiles, scale=scale, support_restriction=support_restriction),
       f_increasing=indep_CDF_increasing,
       fix_m = \(m) get_cdf_indep_function_fix_m(m, scale=scale),
-      f_inverse=\(z, m) decouple_CDF_inverse(z, m, scale=scale)
+      f_inverse=\(z, m) decouple_CDF_inverse(z, m, scale=scale),
+      short_name="CDF"
     )
   )
 }
@@ -712,7 +713,7 @@ get_CDF_decoupler <- function(scale="linear") {
 #' @export
 #'
 #' @examples
-get_cdf_indep_function_fix_m <- function(m, overshoot=0.1, k_percentiles = c(5,50,95), scale="linear") {
+get_cdf_indep_function_fix_m <- function(m, overshoot=0.1, k_percentiles = c(5,50,95), scale="linear", support_restriction=NULL) {
   m <- typecheck_and_convert_matrix_vector(m, vector())
   checkmate::assert_numeric(k_percentiles, len=ncol(m))
   N = nrow(m)
@@ -720,7 +721,7 @@ get_cdf_indep_function_fix_m <- function(m, overshoot=0.1, k_percentiles = c(5,5
   L = min(m)
   U = max(m)
   if (scale=="linear"){
-    new_support <- widen_support(c(L, U), overshoot, support_restriction = NULL)
+    new_support <- widen_support(c(L, U), overshoot, support_restriction = support_restriction)
   } else if (scale=="log") {
     new_support <- widen_support(c(L, U), overshoot, support_restriction = "strict_positive")
   }
