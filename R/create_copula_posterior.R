@@ -163,14 +163,7 @@ create_log_unnormalized_posterior_JC <- function(error_copula, expert_distributi
 
     added_log_error_metric_values <- calc_sum_log_error_terms_JC(error_metric, m, q_vec)
 
-    if (is_vine) {
-      copula_density_values <- rvinecopulib::dvinecop(cdf_values, error_copula, cores=1)
-      log_copula_density_values = log(copula_density_values)
-      # Not an obvious performance bootst on my system using more cores here.
-      #copula_density_values <- rvinecopulib::dvinecop(cdf_values, error_copula, cores=4)
-    } else {
-      log_copula_density_values <- copula::dCopula(cdf_values, error_copula, log = TRUE)
-    }
+    log_copula_density_values <- error_copula$density(cdf_values, log=TRUE)
 
     return(log_copula_density_values + added_log_pdf_values + added_log_error_metric_values )
   }
@@ -181,10 +174,8 @@ create_log_unnormalized_posterior_JC <- function(error_copula, expert_distributi
 create_log_unnormalized_posterior_indep <- function(indep_copula, indep_margins, indep_class, m_matrix, support=NULL) {
   checkmate::assert_matrix(m_matrix, "numeric", any.missing = FALSE)
   E = nrow(m_matrix)
-  checkmate::assert(
-    checkmate::check_class(indep_copula, "vinecop_dist"),
-    checkmate::check_class(indep_copula, "Copula")
-  )
+  checkmate::assert_list(indep_copula)
+  checkmate::assert_subset("density",names(indep_copula))
   nr_dims <- dim(indep_copula)[[1]]
   checkmate::assert_list(indep_margins, len=nr_dims)
 
@@ -216,12 +207,13 @@ create_log_unnormalized_posterior_indep <- function(indep_copula, indep_margins,
     pdf_values <- pdf_cdf_vals$pdf_values
     cdf_values <- pdf_cdf_vals$cdf_values
 
-    if (is(indep_copula, "vinecop_dist")) {
-      copula_density_values <- rvinecopulib::dvinecop(cdf_values, indep_copula, cores=1)
-      log_copula_density_values <- log(copula_density_values)
-    } else {
-      log_copula_density_values <- copula::dCopula(cdf_values, indep_copula, log=TRUE)
-    }
+    log_copula_density_values <- indep_copula$density(cdf_values, log=TRUE)
+    # if (is(indep_copula, "vinecop_dist")) {
+    #   copula_density_values <- rvinecopulib::dvinecop(cdf_values, indep_copula, cores=1)
+    #   log_copula_density_values <- log(copula_density_values)
+    # } else {
+    #   log_copula_density_values <- copula::dCopula(cdf_values, indep_copula, log=TRUE)
+    # }
     added_log_pdf_values <- rowSums(log(pdf_values))
 
     added_log_e_prime_m <- indep_fix_m$f_prime_q(q_vec) |> abs() |> log() |> rowSums()
@@ -249,10 +241,7 @@ create_log_unnormalized_posterior <- function(error_copula, error_margins, error
   d = ncol(m)
   E = nrow(m)
   checkmate::assert_list(error_margins, len=d*E)
-  checkmate::assert(
-    checkmate::check_class(error_copula, "vinecop_dist"),
-    checkmate::check_class(error_copula, "Copula")
-  )
+
   checkmate::assert_set_equal(dim(error_copula)[[1]], d*E)
   is_increasing_flat <- calc_is_increasing_flat(error_metric, m)
 
@@ -278,15 +267,11 @@ create_log_unnormalized_posterior <- function(error_copula, error_margins, error
     pdf_values <- pdf_cdf_vals$pdf_values
     cdf_values <- flip_cdf_values_if_decreasing(pdf_cdf_vals$cdf_values, is_increasing_flat)
 
-    if (is(error_copula, "vinecop_dist")) {
-      copula_density_values <- rvinecopulib::dvinecop(cdf_values, error_copula, cores=1)
-    } else {
-      copula_density_values <- copula::dCopula(cdf_values, error_copula)
-    }
+    log_copula_density_values <- error_copula$density(cdf_values, log=TRUE)
     added_log_pdf_values <- rowSums(log(pdf_values))
 
     added_log_e_prime_m <- calc_sum_log_e_prime_m(error_metric, m, q_vec)
-    ret_density[!out_of_support] <- log(copula_density_values) + added_log_pdf_values + added_log_e_prime_m
+    ret_density[!out_of_support] <- log_copula_density_values + added_log_pdf_values + added_log_e_prime_m
     ret_density
 
   }

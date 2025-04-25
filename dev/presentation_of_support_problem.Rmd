@@ -11,6 +11,47 @@ studies <- load_data_49_filtered(relative_dev_folder = TRUE)
 k_percentiles <- c(5,50,95)
 summ_fun <- get_three_quantiles_summarizing_function()$f
 ```
+# Example partioning metric
+
+```{r}
+study <- studies[[2]]
+test_question_id <- 2
+test_set <- study |> filter(question_id == test_question_id)
+training_set <- study |> filter(question_id != test_question_id)
+test_m_matrix <- test_set |> study_df_single_question_to_summary_matrix(summ_fun, k_percentiles)
+training_assessments <- training_set |> study_df_to_summary_array(summ_fun, k_percentiles)
+cdf_metric <- get_CDF_decoupler(scale="linear", support_restriction = "non_negative")
+
+```
+```{r}
+res <- fit_and_construct_posterior_indep(
+        training_assessments,
+        training_set |> study_df_to_realizations(),
+        test_m_matrix,
+        cdf_metric,
+        "vine",
+        vine_fit_settings = list(),
+        error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=1),
+        q_support_restriction = NULL,
+        connection_threshold =  0.8
+      )
+```
+
+```{r}
+x <- seq(res$posterior$support[1], res$posterior$support[2], length.out = 1000)
+y <- res$posterior$logDM(x)
+plot(x,exp(y))
+s <- sample_log_unnormalized_density(res$posterior$logDM, res$posterior$support, 1000)
+```
+```{r}
+median(s)
+plot(density(s))
+```
+
+
+
+
+
 # Examnple CDF independence metric
 ```{r}
 study <- filter_study_keep_ids(studies, 43)[[1]]
@@ -21,6 +62,8 @@ training_set <- study |> filter(question_id != test_question_id)
 test_m_matrix <- test_set |> study_df_single_question_to_summary_matrix(summ_fun, k_percentiles)
 training_assessments <- training_set |> study_df_to_summary_array(summ_fun, k_percentiles)
 cdf_metric <- get_CDF_decoupler(scale="linear", support_restriction = "non_negative")
+
+
 ```
 ```{r}
 res <- fit_and_construct_posterior_indep(

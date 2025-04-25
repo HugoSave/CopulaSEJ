@@ -53,12 +53,105 @@ bicopula_smoothing_limits <- function(family) {
   list(lower=lower, upper=upper)
 }
 
+partition_errors_disjoint <- function(error_matrix, threshold=0.7) {
+  stopifnot(length(dim(error_matrix)) == 2)
+  # we want to find groups of errors that are disjoint
+  # determine the correlation between experts
+  cor_matrix <- copula::corKendall(error_matrix)
+  adjacency_matrix <- cor_matrix
+  # set the diagonal to 0
+  diag(adjacency_matrix) <- 0
+  # set values with abs value less than threshold to 0 and other to 1
+  adjacency_matrix[abs(cor_matrix) < threshold] <- 0
+  adjacency_matrix[abs(cor_matrix) >= threshold] <- 1
+  graph <- igraph::graph_from_adjacency_matrix(adjacency_matrix, mode = "undirected", diag = FALSE)
+  igraph::components(graph)
+}
+
+partition_and_fit_copulas <- function(error_matrix, copula_model, threshold, fit_settings) {
+  partionings <- partition_errors_disjoint(error_matrix, threshold)
+  groups <- igraph::groups(partionings)
+  copulas <- igraph::groups(partionings) |> purrr::map(\(group) {
+    group_obs <- error_matrix[,group,drop=FALSE]
+    rlang::inject(fit_copula(group_obs, copula_model, !!!fit_settings))
+  })
+
+  density <- function(u_mat, log=FALSE) { # u_mat is a vec that is dE long or a nx(d*E) matrix
+    if (is.vector(u_mat)) {
+      u_mat <- matrix(u_mat, nrow=1)
+    }
+    stopifnot(is.matrix(u_mat))
+    # use membership info to know what copula to feed what subsections of the u vec
+    densities <- purrr::imap(groups, \(group, i) {
+      u_subset <- u_mat[,group, drop=FALSE]
+      copulas[[i]]$density(u_subset, log=log)
+    }) # list of length nr of groups. Each element is a vector of same length as number of rows or u_mat
+    # product of densities
+    purrr::reduce(densities, \(x,y) x * y)
+  }
+
+  distribution <- function(u_mat) { # u_mat is a vec that is dE long or a nx(d*E) matrix
+    if (is.vector(u_mat)) {
+      u_mat <- matrix(u_mat, nrow=1)
+    }
+    stopifnot(is.matrix(u_mat))
+    # use membership info to know what copula to feed what subsections of the u vec
+    distributions <- purrr::imap(groups, \(group, i) {
+      u_subset <- u_mat[,group, drop=FALSE]
+      copulas[[i]]$distribution(u_subset)
+    }) # list of length nr of groups. Each element is a vector of same length as number of rows or u_mat
+    # product of densities
+    purrr::reduce(distributions, \(x,y) x * y)
+  }
+  list(
+    density = density,
+    distribution = distribution,
+    copulas = copulas
+  )
+}
+
+wrap_copula <- function(copula) {
+  if (inherits(copula, "vinecop")) {
+    density_function <- function(u_vec, log=FALSE) {
+      if (log) {
+        log(rvinecopulib::dvinecop(u_vec, copula))
+      } else {
+        rvinecopulib::dvinecop(u_vec, copula)
+      }
+    }
+    distribution_function <- function(u_vec) {
+      rvinecopulib::pvinecop(u_vec, copula)
+    }
+
+    return(list(
+      density = density_function,
+      distribution = distribution_function,
+      copula=copula
+    ))
+  } else if (inherits(copula, "copula") || inherits(copula, "indepCopula")) {
+    return(list(
+      density = \(u, log=FALSE) copula::dCopula(u, copula, log=log),
+      distribution = \(u) copula::pCopula(u, copula),
+      copula=copula
+    ))
+  } else {
+    stop(paste("Unknown copula type", class(copula)))
+  }
+
+}
+
 # error_obs is nx(d*E) matrix (n questions, d * E errors)
 fit_copula <- function(error_obs, copula_model = "joe",
                        family_set = c("gaussian","indep"),
                        selcrit="mbicv", psi0=0.5,
                        copula_fit_method="itau",
                        threshold=0.5) {
+  if (ncol(error_obs) == 1) {
+    indep1DCopula = copula::indepCopula(dim=1)
+
+    return(wrap_copula(indep1DCopula))
+  }
+
   res <- checkmate::check_number(nrow(error_obs), lower=10)
   if (is.character(res)) {
     checkmate::makeAssertion(error_obs, "Number of training samples must be at least 10. This comes from a hard coded limit in the rvinecopula (and vineCopula) package when fitting a copula.",
@@ -76,7 +169,7 @@ fit_copula <- function(error_obs, copula_model = "joe",
     lower = 1
     upper = 18.7 # 18.7 Corresponds to an Kendall tau of 0.9. For numerical reasons we limit it to this.
   } else if (copula_model == "indep") {
-    return(copula::indepCopula(dim = error_length))
+    return(wrap_copula(copula::indepCopula(dim = error_length)))
   } else if (copula_model == "frank") {
     copula_model <- copula::frankCopula(dim = error_length)
     lower = 0
@@ -112,9 +205,7 @@ fit_copula <- function(error_obs, copula_model = "joe",
                                          bicop
                                        })
 
-    return(cop_fit)
-
-
+    return(wrap_copula(cop_fit))
   }
   else {
     stop("Unknown copula model")
@@ -163,7 +254,7 @@ fit_copula <- function(error_obs, copula_model = "joe",
   # copula_model@parameters <- coef(fitted_params)
   #tau(copula_model)
   #print(cor(wide_df, method = "kendall"))
-  fitted_params@copula
+  wrap_copula(fitted_params@copula)
 }
 
 # Returns a list frame with the L, U, L* and U* for the assessmenet given. Must be usedd for a single study and question.
@@ -600,7 +691,8 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
                                            q_support_overshoot=0.1,
                                            rejection_threshold=NULL,
                                            rejection_min_experts=3,
-                                           rejection_test="distance_correlation") {
+                                           rejection_test="distance_correlation",
+                                           connection_threshold=NULL) {
   checkmate::assert_array(training_estimates, "numeric", d=3)
   checkmate::assert_numeric(training_realizations)
   checkmate::assert_matrix(test_matrix, "numeric")
@@ -613,6 +705,7 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
   checkmate::assert_number(rejection_threshold, null.ok=TRUE, lower=0, upper=1)
   checkmate::assert_count(rejection_min_experts, positive=TRUE)
   checkmate::assert_subset(rejection_test, c("kruskal", "classical_calibration", "distance_correlation"))
+  checkmate::assert_number(connection_threshold, null.ok=TRUE, lower=0, upper=1)
 
   # TODO implement a domain check prior?
   # domain_check <- decoupler$check_domain(abind::abind(training_estimates,
@@ -658,9 +751,13 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
   D_tilde = dim(decouple_values)[3]
   margin_distributions <- add_d_e_to_list(margin_distributions, D_tilde)
 
-  error_copula <- rlang::inject(fit_copula(decouple_flattened, copula_model, !!!vine_fit_settings))
+  if (is.null(connection_threshold)){
+    decoupler_copula <- rlang::inject(fit_copula(decouple_flattened, copula_model, !!!vine_fit_settings))
+  } else {
+    decoupler_copula <- partition_and_fit_copulas(decouple_flattened, copula_model, connection_threshold, vine_fit_settings)
+  }
 
-  posterior<-create_log_unnormalized_posterior_indep(error_copula,
+  posterior<-create_log_unnormalized_posterior_indep(decoupler_copula,
                                                margin_distributions,
                                                decoupler,
                                                test_matrix,
@@ -670,13 +767,31 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
     warning = warning,
     flattened_errors=decouple_flattened,
     errors=decouple_values,
-    error_copula=error_copula,
+    decoupler_copula=decoupler_copula,
     error_margins=margin_distributions
   )
   if (exists("rejection_results")) {
     ret$accepted_experts <- rejection_results$accepted_experts
   }
   ret
+}
+
+posterior_product_predictor <- function(test_matrix,
+                                     overshoot = 0.1,
+                                     k_percentiles=c(5,50,95),
+                                        q_support_restriction=NULL) {
+
+  decoupler <- get_CDF_decoupler(scale="linear", overshoot=overshoot, k_percentiles=k_percentiles, support_restriction = q_support_restriction)
+  decoupler_fix_m <- decoupler$fix_m(test_matrix)
+
+  logDM <- function(q) {
+    pdf_vals <- decoupler_fix_m$f(q) |> abind::adrop(drop=3) # nxEx1 to nxE
+    matrixStats::rowProds(pdf_vals)
+  }
+
+  list(
+    posterior = list(logDM=logDM, support=decoupler_fix_m$support)
+  )
 }
 
 #' Title
@@ -780,7 +895,7 @@ decoupler_support_to_q_support <- function(decouple_support, m, e, d, decoupler)
 }
 
 construct_posterior_margins <- function(margin_distributions, decoupler, m_matrix) {
-  decoupler <- decoupler$freeze_m(m_matrix)
+  decoupler <- decoupler$fix_m(m_matrix)
 
   force(decoupler)
   single_output_f <- function(q, e, d) {
@@ -1020,7 +1135,8 @@ study_test_performance <- function(study_data, sim_params = NULL) {
           q_support_restriction = p$q_support_restriction,
           rejection_test = p$rejection_test,
           rejection_threshold = p$rejection_threshold,
-          rejection_min_experts = p$rejection_min_experts
+          rejection_min_experts = p$rejection_min_experts,
+          connection_threshold = p$connection_threshold
         )
         }, error = \(e) {
           warning(e)
@@ -1054,6 +1170,14 @@ study_test_performance <- function(study_data, sim_params = NULL) {
       posterior <- res$posterior
       warnings <- append(warnings, res$warning)
       nr_experts <- dim(res$errors)[2]
+    } else if (p$prediction_method == "density_product") {
+      res <- posterior_product_predictor(
+        df_format_to_array_format(training_set, test_set, p$summarizing_function$f, p$k_percentiles)$test_summaries,
+        overshoot = p$overshoot,
+        k_percentiles = p$k_percentiles,
+        q_support_restriction = p$q_support_restriction
+      )
+      posterior <- res$posterior
     } else if (p$prediction_method == "perfect_expert") {
       res <- copula_fit_and_predict_JC_assumption(
         training_set,
@@ -1126,11 +1250,13 @@ default_simulation_params <- function(copula_model = "joe",
                                       rejection_test = "distance_correlation",
                                       rejection_min_experts = 1,
                                       rejection_threshold = 0.05,
-                                      summarizing_function = NULL,
-                                      error_metric = NULL,
+                                      summarizing_function = get_three_quantiles_summarizing_function(),
+                                      error_metric = get_CDF_decoupler(),
                                       error_estimation_settings = list(),
                                       vine_fit_settings=list(),
-                                      q_support_restriction=NULL) {
+                                      q_support_restriction=NULL,
+                                      overshoot=0.1,
+                                      connection_threshold=NULL) {
   checkmate::assert_string(copula_model)
   checkmate::assert_numeric(k_percentiles, sorted=TRUE, lower=0, upper=100)
   checkmate::assert_string(interpolation)
@@ -1140,21 +1266,16 @@ default_simulation_params <- function(copula_model = "joe",
   checkmate::assert_number(rejection_threshold, null.ok=TRUE, lower=0, upper=1) # if NULL then no rejection happens
   checkmate::assert_class(summarizing_function, "summarizing_function", null.ok=TRUE)
   checkmate::assert(
-    checkmate::check_class(error_metric, "decoupler", null.ok=TRUE),
-    checkmate::check_class(error_metric, "error_metric", null.ok=TRUE)
+    checkmate::check_class(error_metric, "decoupler"),
+    checkmate::check_class(error_metric, "error_metric")
   )
   checkmate::assert_list(error_estimation_settings)
   checkmate::assert_list(vine_fit_settings)
   checkmate::assert_string(q_support_restriction, null.ok=TRUE)
+  checkmate::assert_number(overshoot, lower=0, finite=TRUE)
+  checkmate::assert_number(connection_threshold, null.ok=TRUE, lower=0, upper=1)
 
 
-
-  if (is.null(summarizing_function)) {
-    summarizing_function <- get_three_quantiles_summarizing_function()
-  }
-  if (is.null(error_metric)) {
-    error_metric <- get_CDF_decoupler()
-  }
   params <- list(
     copula_model = copula_model,
     k_percentiles = k_percentiles,
@@ -1167,7 +1288,9 @@ default_simulation_params <- function(copula_model = "joe",
     error_metric = error_metric,
     vine_fit_settings = vine_fit_settings,
     error_estimation_settings=error_estimation_settings,
-    q_support_restriction=q_support_restriction
+    q_support_restriction=q_support_restriction,
+    overshoot=overshoot,
+    connection_threshold=connection_threshold
   )
   class(params) <- "simulation_parameters"
   params

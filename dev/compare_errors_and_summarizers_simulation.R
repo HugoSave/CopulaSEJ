@@ -35,7 +35,10 @@ prediction_method_shortname <- function(prediction_method) {
     return("Co")
   } else if (prediction_method == "perfect_expert") {
     return("PE")
-  } else {
+  } else if (prediction_method == "density_product") {
+    return("DP")
+  }
+  else {
     return(prediction_method)
   }
 }
@@ -50,6 +53,16 @@ error_metric_and_summ_shortname <- function(error_metric, summarizing_function) 
   }
 }
 
+connection_threshold_shortname <- function(connection_threshold) {
+  # Create a short name for the connection threshold
+  if (is.null(connection_threshold)) {
+    return("NoCT")
+  } else {
+    return(glue::glue("CT({connection_threshold})"))
+  }
+}
+
+
 parameter_shortname <- function(sim_params, sep="") {
   paste(
     prediction_method_shortname(sim_params$prediction_method),
@@ -59,6 +72,7 @@ parameter_shortname <- function(sim_params, sep="") {
     rejection_shortname(sim_params$rejection_test,
                         sim_params$rejection_threshold,
                         sim_params$rejection_min_experts),
+    connection_threshold_shortname(sim_params$connection_threshold),
     sep=sep
   )
 }
@@ -126,24 +140,42 @@ create_file_name <- function(sim_params, sim_group="tmp", sim_nr=NULL) {
   return(file_name)
 }
 
-run_study <- function(studies, params, sim_group="tmp"){
+run_study_find_posterior <- function(studies, params, sim_group="tmp"){
   print(glue::glue("Analyzing method: {params$prediction_method} with copula model: {params$copula_model} and error metric: {params$error_metric$name} and summarising function: {params$summarizing_function$name}"))
 
   analysis_res <- run_analysis_per_study(studies, params)
   analysis_res$results["prediction_method"] <- parameter_shortname(params)
-  file_name <- create_file_name(params, sim_group=sim_group)
+  #file_name <- create_file_name(params, sim_group=sim_group)
   analysis_res$params <- params
-  print(glue::glue("Saving results to {file_name}"))
-  saveRDS(analysis_res, file_name)
-  analysis_res$file_name <- file_name
+  #print(glue::glue("Saving results to {file_name}"))
+  #saveRDS(analysis_res, file_name)
+  #analysis_res$file_name <- file_name
   analysis_res
+}
+
+sample_and_add_metrics <- function(analys_res) {
+  df <- analys_res$results
+  list_of_metrics <- purrr::map2(df$posterior, df$realization, \(post, realization) {
+    if (is.null(post)) {
+      return(performance_metrics_list()) # defaults to NA for all metrics
+    } else {
+      return(posterior_performance_metrics(post$logDM, post$support, realization, num_samples=1000))
+    }
+  })
+
+  metric_df <- list_of_metrics |> purrr::list_transpose() |> tibble::as_tibble()
+  results <- dplyr::bind_cols(df, metric_df)
+  results$prediction <- results$median
+  results$error = results$prediction - results$realization
+  results$rel_error = results$error / results$realization
+  results$support = results$posterior |> purrr::map(\(x) x$support)
+  results
 }
 
 push_list <- function(list, item) {
   list[[length(list) + 1]] <- item
   return(list)
 }
-
 
 if (!interactive()) {
   library(devtools)
@@ -163,8 +195,16 @@ if (!interactive()) {
   # list_mod <- change_value_in_study_list(list_mod, numerical_col_names, 0, 0.001)$study_list
   #list_mod <- filter_studies_support_magnitude_diff(list_mod, numerical_col_names, max_mag_diff = 1000)
 
-  data_list_short <-studies
+  data_list_short <-studies[1]
   param_list <- list()
+
+  param_list <- push_list(param_list,
+                          default_simulation_params(
+                            prediction_method = "density_product",
+                            overshoot=0.1,
+                            summarizing_function = get_three_quantiles_summarizing_function(),
+                            q_support_restriction = NULL,
+                          ))
 
   param_list <- push_list(param_list,
     default_simulation_params(
@@ -178,6 +218,19 @@ if (!interactive()) {
                              selcrit="mbicv", threshold=0.7),
     q_support_restriction = 'non_negative'
   ))
+
+  param_list <- push_list(param_list,
+                          modifyList(param_list[[1]],
+                                     list(
+                                       connection_threshold=0.8
+                                     ))
+  )
+  param_list <- push_list(param_list,
+                          modifyList(param_list[[1]],
+                                     list(
+                                       connection_threshold=0.6
+                                     ))
+  )
 
   param_list <- push_list(param_list,
     modifyList(param_list[[1]],
@@ -198,6 +251,7 @@ if (!interactive()) {
   param_list <- push_list(param_list,
     modifyList(param_list[[length(param_list)]],
                        list(
+                         rejection_threshold = 0.05,
                          rejection_test = "classical_calibration"
                        ))
   )
@@ -212,14 +266,14 @@ if (!interactive()) {
                        list(
                          rejection_threshold = 0.05,
                          rejection_min_experts = 1,
-                         rejection_test = "classical_calibration"
+                         rejection_test = "distance_correlation"
                        ))
   )
 
   param_list <- push_list(param_list,
                        modifyList(param_list[[length(param_list)]],
                                   list(
-                                    rejection_test = "distance_correlation"
+                                    rejection_test = "classical_calibration"
                                   ))
   )
 
@@ -227,7 +281,7 @@ if (!interactive()) {
   param_list <- push_list(param_list, default_simulation_params(
     prediction_method = "perfect_expert",
     copula_model = "frank",
-    error_metric = get_linear_decoupler(),
+    error_metric = get_linear_error_metric(),
     summarizing_function = get_median_summarizing_function(),
     rejection_threshold = NULL,
     q_support_restriction = 'non_negative'
@@ -249,31 +303,54 @@ if (!interactive()) {
                                   ))
   )
 
-  result_list <- purrr::map(param_list, \(x) {
-    run_study(data_list_short, x, "RejTest")
+  param_list <- push_list(param_list,
+                      default_simulation_params(
+                        prediction_method = "perfect",
+                        copula_model = "frank",
+                        error_metric = get_linear_error_metric(),
+                        summarizing_function = get_median_summarizing_function(),
+                        rejection_threshold = NULL,
+                        q_support_restriction = 'non_negative'
+                       )
+  )
+
+  result_list <- purrr::map(param_list[2:3], \(x) {
+    analys_res <- run_study_find_posterior(data_list_short, x, "RejTest")
+    results_with_metrics <- sample_and_add_metrics(analys_res)
+    results_with_metrics$posterior <- NULL
+    file_name <- create_file_name(x, "RejTest")
+    print(glue::glue("Saving results to {file_name}"))
+    saveRDS(results_with_metrics, file_name)
+    analys_res$results <- results_with_metrics
+    analys_res
   })
 
   res_combined <- result_list |> combine_simulation_results()
 
-#   run_study(data_list_short, get_linear_decoupler(), get_median_summarizing_function(), prediction_method="copula",
+  saveRDS(res_combined, "dev/output/compare_errors_and_summarizers_simulation.rds")
+
+  print("Results saved to dev/output/compare_errors_and_summarizers_simulation.rds")
+
+
+#   run_study_find_posterior(data_list_short, get_linear_decoupler(), get_median_summarizing_function(), prediction_method="copula",
 #             copula_model = "vine",
 #             sim_params = list(
 #               q_support_restriction = 'non_negative',
 #               vine_fit_settings = list(family_set = c("onepar","indep"),
 #                                         selcrit="mbicv", threshold = 0.7)
 #             ))
-#   run_study(data_list_short, get_linear_decoupler(), get_median_summarizing_function(), prediction_method="copula",
+#   run_study_find_posterior(data_list_short, get_linear_decoupler(), get_median_summarizing_function(), prediction_method="copula",
 #             copula_model = "indep",
 #             sim_params = list(
 #               q_support_restriction = 'non_negative'
 #             ))
 #
-  # run_study(data_list_short, get_linear_error_metric(), get_median_summarizing_function(), prediction_method="perfect_expert",
+  # run_study_find_posterior(data_list_short, get_linear_error_metric(), get_median_summarizing_function(), prediction_method="perfect_expert",
   #           copula_model = "frank",
   #           sim_params = list(
   #             q_support_restriction = 'non_negative'
   #           ))
-    # run_study(data_list_short, get_linear_error_metric(), get_median_summarizing_function(), prediction_method="copula",
+    # run_study_find_posterior(data_list_short, get_linear_error_metric(), get_median_summarizing_function(), prediction_method="copula",
     #           copula_model = "vine",
     #           sim_params = list(
     #             q_support_restriction = 'non_negative',
@@ -283,42 +360,42 @@ if (!interactive()) {
 
   # vine_fit_settings = list(threshold = 0.8),
   #res_combined <- get_simulation_group_files(rel_dev=FALSE) |> load_files() |> combine_simulation_results()
-  post_df = res_combined$results
-  warnings = res_combined$warnings
 
   # error_metrics = list(get_sigmoid_relative_error_metric(), get_sigmoid_linear_error_metric())
   # #error_metrics = list(get_ratio_error_metric(), get_linear_error_metric())
   # summarizing_functions = list(get_median_summarizing_function())
   # for (error_metric in error_metrics) {
   #   for (summarizing_function in summarizing_functions) {
-  #     res <- run_study(data_list_short, error_metric, summarizing_function)
+  #     res <- run_study_find_posterior(data_list_short, error_metric, summarizing_function)
   #     results <- append(results, list(res$results))
   #     warnings <- append(warnings, list(res$warnings))
   #   }
   # }
 
-  print("Sampling predictions...")
-
-  #preds <- results_df$posterior |> purrr::map_dbl(\(post) mean(sample_log_unnormalized_density(post$logDM, post$support, 1000)))
-  list_of_metrics <- purrr::map2(post_df$posterior, post_df$realization, \(post, realization) {
-    if (is.null(post)) {
-      return(performance_metrics_list()) # defaults to NA for all metrics
-    } else {
-      return(posterior_performance_metrics(post$logDM, post$support, realization, num_samples=1000))
-    }
-  })
-
-  metric_df <- list_of_metrics |> purrr::list_transpose() |> tibble::as_tibble()
-  results <- dplyr::bind_cols(post_df, metric_df)
-  results$prediction <- results$median
-  results$error = results$prediction - results$realization
-  results$rel_error = results$error / results$realization
-  results$support = results$posterior |> purrr::map(\(x) x$support)
-  results$posterior = NULL  # we drop this column to save space when saving.
-
-  saveRDS(list(results_df=results, warnings=warnings), "dev/output/compare_errors_and_summarizers_simulation.rds")
-
-  print("Results saved to dev/output/compare_errors_and_summarizers_simulation.rds")
+  # post_df = res_combined$results
+  # warnings = res_combined$warnings
+  # print("Sampling predictions...")
+#
+  # #preds <- results_df$posterior |> purrr::map_dbl(\(post) mean(sample_log_unnormalized_density(post$logDM, post$support, 1000)))
+  # list_of_metrics <- purrr::map2(post_df$posterior, post_df$realization, \(post, realization) {
+  #   if (is.null(post)) {
+  #     return(performance_metrics_list()) # defaults to NA for all metrics
+  #   } else {
+  #     return(posterior_performance_metrics(post$logDM, post$support, realization, num_samples=1000))
+  #   }
+  # })
+#
+  # metric_df <- list_of_metrics |> purrr::list_transpose() |> tibble::as_tibble()
+  # results <- dplyr::bind_cols(post_df, metric_df)
+  # results$prediction <- results$median
+  # results$error = results$prediction - results$realization
+  # results$rel_error = results$error / results$realization
+  # results$support = results$posterior |> purrr::map(\(x) x$support)
+  # results$posterior = NULL  # we drop this column to save space when saving.
+#
+  # saveRDS(list(results_df=results, warnings=warnings), "dev/output/compare_errors_and_summarizers_simulation.rds")
+#
+  # print("Results saved to dev/output/compare_errors_and_summarizers_simulation.rds")
 }
 
 

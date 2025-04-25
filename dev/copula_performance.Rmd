@@ -103,7 +103,7 @@ abs_values <- results_df |> filter(realization!=0 & prediction!=0) |> mutate(rea
   scale_x_continuous(trans =  "log10")+
   facet_wrap(~prediction_method) +
   theme_minimal()
-ggsave("Output/abs_values.pdf", abs_values, width = 10, height = 10)
+ggsave("output/abs_values.pdf", abs_values, width = 10, height = 10)
 abs_values
 ```
 
@@ -131,15 +131,15 @@ relative_erros_violins
 ```{r}
 # some plot that per study shows the prediction of a specific method
 
-max_rel_error_in_plt = 10
+max_rel_error_in_plt = 5
 
 nr_studies <- max(results_df$study_id)
 breaks <- unique(c(1, seq(from=10, to=nr_studies, by=10), nr_studies))
 minor_b <- 1:nr_studies
 
 rel_error_per_plot <- results_df |> filter(realization!=0 & abs(rel_error) < max_rel_error_in_plt) |> ggplot(aes(study_id, rel_error, group=study_id)) +
-  geom_boxplot() + facet_grid(rows=vars(prediction_method)) + 
-  scale_x_continuous(breaks = breaks, minor_breaks=minor_b) +
+  geom_boxplot() + facet_wrap(facets=vars(prediction_method), ncol=1) + 
+  scale_x_continuous(breaks = breaks, minor_breaks=minor_b, limits= c(1, nr_studies)) +
   labs(x = "Study ID",
        y = "Relative Error")
 
@@ -147,7 +147,7 @@ nr_filtered_points <- results_df |> filter(realization!=0 & abs(rel_error) < max
 nr_away_filtered_points <- results_df |> nrow() - nr_filtered_points
 # lowest number of points for a study
 
-ggsave("output/rel_error_per_plot_generalization.pdf", rel_error_per_plot, width = 10, height = 10)
+ggsave("output/rel_error_per_plot_generalization.pdf", rel_error_per_plot, width = 8, height = 10)
 rel_error_per_plot
 ```
 ```{r}
@@ -168,7 +168,7 @@ results_df |> filter(realization!=0 & !is.na(rel_error)) |> group_by(prediction_
 ```
 ### Point results rel_error less than 10
 ```{r}
-results_df |> filter(realization!=0 & abs(rel_error) < 10 &  !is.na(rel_error)) |> group_by(prediction_method) |>  summarise(MAPE = mean(abs(rel_error)),MedAPE = median(abs(rel_error)), RMSPE = sqrt(mean(rel_error^2)), MAXPE = max(abs(rel_error)), MedNLL=median(neg_log_lik))
+results_df |> filter(realization!=0 & abs(rel_error) < 100 &  !is.na(rel_error)) |> group_by(prediction_method) |>  summarise(MAPE = mean(abs(rel_error)),MedAPE = median(abs(rel_error)), RMSPE = sqrt(mean(rel_error^2)), MAXPE = max(abs(rel_error)), MedNLL=median(neg_log_lik))
 ```
 
 
@@ -176,25 +176,40 @@ results_df |> filter(realization!=0 & abs(rel_error) < 10 &  !is.na(rel_error)) 
 nr_studies <- length(unique(results_df$study_id))
 # Look at per study, which prediction method performed the best?
 error_metrics_per_study <- results_df |> filter(realization!=0 & abs(rel_error) < 10) |> group_by(study_id, prediction_method) |> 
-  summarise(MAPE = mean(abs(rel_error)), RMSPE = mean(rel_error^2), MAXPE = max(abs(rel_error)), .groups="drop")
+  summarise(MAPE = mean(abs(rel_error)), MedAPE = median(abs(rel_error)), RMSPE = mean(rel_error^2), MAXPE = max(abs(rel_error)), .groups="drop")
 
 # check the number of times each prediction method performed the best
 best_prediction_method_per_study <- error_metrics_per_study |> 
   group_by(study_id) |> 
   summarise(MAPE = prediction_method[which.min(MAPE)], 
+            MedAPE = prediction_method[which.min(MedAPE)],
             RMSPE= prediction_method[which.min(RMSPE)],
             MAXPE=prediction_method[which.min(MAXPE)]) 
 
-proportion_table <- best_prediction_method_per_study |> 
+prediction_types <- results_df$prediction_method |> unique() |> sort()
+error_metrics <- colnames(best_prediction_method_per_study)[-c(1)]
+prediction_types <- prediction_types |> purrr::lmap(\(type_l) {l <- list(); l[[type_l]]=NA_real_; l})
+proportion_table <- tibble(error_metric = error_metrics, !!!prediction_types)
+
+proportion_table_ <- best_prediction_method_per_study |> 
   pivot_longer(-study_id, names_to="error_metric", values_to = "prediction_method") |>
   group_by(error_metric, prediction_method) |> summarise(n=n()/nr_studies, .groups="drop")  |>
   pivot_wider(names_from = prediction_method, values_from = n) 
+proportion_table <- dplyr::rows_update(proportion_table, proportion_table_)
+# replace na with 0
+proportion_table <- proportion_table |> mutate(across(where(is.numeric), ~replace_na(.x, 0)))
 
 proportion_table_formatted <- proportion_table |> mutate(across(where(is.numeric), ~round(.x*100, digits=1))) |> mutate(across(where(is.numeric), ~paste(.x, "%"))) 
 print(as.character(kable(proportion_table_formatted, "latex")))
-proportion_table
+proportion_table |> mutate(error_metric = paste0(error_metric, "_prop")) |> column_to_rownames("error_metric") |> t() |> data.frame() |> rownames_to_column(var="method")
+
 
 ```
+# Look at rates of rejection
+```{r}
+results_df |> ggplot2::ggplot(aes(x=(experts-accepted_experts))) + geom_histogram(binwidth=1, center=0) + facet_wrap(facets=vars(prediction_method))
+```
+
 
 # Find and look at one of those high error estimates
 ```{r}

@@ -696,7 +696,7 @@ get_CDF_decoupler <- function(scale="linear", overshoot=0.1, k_percentiles=c(5,5
       f=\(q,m) indep_CDF(q, m, overshoot=overshoot, k_percentiles=k_percentiles, scale=scale, support_restriction=support_restriction),
       f_prime_q=\(q,m) indep_CDF_prime_q(q, m, overshoot=overshoot, k_percentiles=k_percentiles, scale=scale, support_restriction=support_restriction),
       f_increasing=indep_CDF_increasing,
-      fix_m = \(m) get_cdf_indep_function_fix_m(m, scale=scale),
+      fix_m = \(m) get_cdf_indep_function_fix_m(m, overshoot=overshoot, k_percentiles=k_percentiles, scale=scale, support_restriction=support_restriction),
       f_inverse=\(z, m) decouple_CDF_inverse(z, m, scale=scale),
       short_name="CDF"
     )
@@ -714,34 +714,10 @@ get_CDF_decoupler <- function(scale="linear", overshoot=0.1, k_percentiles=c(5,5
 #'
 #' @examples
 get_cdf_indep_function_fix_m <- function(m, overshoot=0.1, k_percentiles = c(5,50,95), scale="linear", support_restriction=NULL) {
-  m <- typecheck_and_convert_matrix_vector(m, vector())
-  checkmate::assert_numeric(k_percentiles, len=ncol(m))
-  N = nrow(m)
-  is_increasing_matrix <- matrix(TRUE, nrow=N, ncol=1) # single CDF value per expert
-  L = min(m)
-  U = max(m)
-  if (scale=="linear"){
-    new_support <- widen_support(c(L, U), overshoot, support_restriction = support_restriction)
-  } else if (scale=="log") {
-    new_support <- widen_support(c(L, U), overshoot, support_restriction = "strict_positive")
-  }
-  L_star = new_support[1]
-  U_star = new_support[2]
-  cdf_values <- c(0, k_percentiles/100, 1)
-  extended_m_matrix <- abind::abind(matrix(L_star, nrow=N, ncol=1), m, matrix(U_star, nrow=N, ncol=1), along=2)
-  if (scale=="linear") {
-    distributions <- purrr::array_branch(extended_m_matrix, 1) |>
-      purrr::map(\(fractiles) {
-        linear_distribution_interpolation(fractiles, cdf_values)
-      })
-  } else if(scale=="log") {
-    distributions <- purrr::array_branch(extended_m_matrix, 1) |>
-      purrr::map(\(fractiles) {
-        log_linear_distribution_interpolation(fractiles, cdf_values)
-      })
-  } else {
-    stop("Unknown scale")
-  }
+  distributions <- distributions_from_percentile_matrix(m, overshoot=overshoot, k_percentiles=k_percentiles, scale=scale, support_restriction=support_restriction)
+  support <- distributions$support
+  distributions <- distributions$distributions
+  is_increasing_matrix <- matrix(TRUE, nrow=nrow(m), ncol=1) # single CDF value per expert
 
   # returns ZxNx1 if N is rows of m and Z is length of z
   f_inverse <- function(z) {
@@ -775,7 +751,7 @@ get_cdf_indep_function_fix_m <- function(m, overshoot=0.1, k_percentiles = c(5,5
     return(is_increasing_matrix)
   }
 
-  new_fixed_decoupler(
+  decoupler <- new_fixed_decoupler(
     name = "CDF",
     f=f,
     f_prime_q=f_prime_q_fix_m,
@@ -783,6 +759,8 @@ get_cdf_indep_function_fix_m <- function(m, overshoot=0.1, k_percentiles = c(5,5
     D=1,
     f_inverse=f_inverse
   )
+  decoupler$support <- support
+  decoupler
 }
 
 
