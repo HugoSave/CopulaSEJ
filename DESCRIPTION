@@ -25,7 +25,8 @@ Imports:
     extraDistr,
     BayesianTools,
     ks,
-    matrixStats
+    matrixStats,
+    igraph
 Suggests: 
     testthat (>= 3.0.0)
 Config/testthat/edition: 3

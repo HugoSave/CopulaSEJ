@@ -64,6 +64,9 @@ connection_threshold_shortname <- function(connection_threshold) {
 
 
 parameter_shortname <- function(sim_params, sep="") {
+  if (sim_params$prediction_method == "density_product") {
+    stopifnot(!is.null(sim_params$copula_model))
+  }
   paste(
     prediction_method_shortname(sim_params$prediction_method),
     copula_shortname(sim_params$copula_model),

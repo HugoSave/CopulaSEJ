@@ -14,7 +14,7 @@ library(knitr)
 library(CopulaSEJ)
 
 source("dev_utils.R")
-source("error_dependence_test_simulation.R")
+source("decoupler_dependence_test_simulation.R")
 
 data_list_form <- load_data_49()[1:2]
 
