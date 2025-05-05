@@ -628,10 +628,10 @@ decoupler_linear_increasing <- function(m) {
 }
 
 decoupler_linear_inverse <- function(z, m) {
-  m <- typecheck_and_convert_matrix_vector(m, q)
+  m <- typecheck_and_convert_matrix_vector(m, z)
   D = ncol(m)
   E = nrow(m)
-  N = length(q)
+  N = length(z)
   z_rep_matrix = array(z, dim=(c(N,E,D)))
   m_rep_matrix = array(m, dim=(c(E, D, N))) |> aperm(c(3,1,2)) # this flips it to NxExD
   (z_rep_matrix + m_rep_matrix)
@@ -663,6 +663,66 @@ get_linear_decoupler <- function() {
   )
 }
 
+#### Decoupler Ratio
+decoupler_ratio <- function(q, m) {
+  m <- typecheck_and_convert_matrix_vector(m, q)
+  D = ncol(m)
+  E = nrow(m)
+  N = length(q)
+  m_rep_matrix = array(m, dim=(c(E, D, N))) |> aperm(c(3,1,2)) # this flips it to NxExD
+  q_rep_matrix = array(q, dim=(c(N, E, D)))
+  q_rep_matrix / m_rep_matrix
+}
+
+decoupler_ratio_prime_q <- function(q, m) {
+  m <- typecheck_and_convert_matrix_vector(m, q)
+  D = ncol(m)
+  E = nrow(m)
+  N = length(q)
+  m_rep_matrix = array(m, dim=(c(E, D, N))) |> aperm(c(3,1,2)) # this flips it to NxExD
+  1 / m_rep_matrix
+}
+
+decoupler_ratio_increasing <- function(m) {
+  m <- typecheck_and_convert_matrix_vector(m, vector())
+  return(is_positive_no_zero(m))
+}
+
+decoupler_ratio_inverse <- function(z, m) {
+  m <- typecheck_and_convert_matrix_vector(m, z)
+  D = ncol(m)
+  E = nrow(m)
+  N = length(z)
+  m_rep_matrix = array(m, dim=(c(E, D, N))) |> aperm(c(3,1,2)) # this flips it to NxExD
+  z_rep_matrix = array(z, dim=(c(N,E,D)))
+  z_rep_matrix * m_rep_matrix
+}
+
+decoupler_ratio_fix_m <- function(m) {
+  increasing_matrix = decoupler_ratio_increasing(m)
+  new_fixed_decoupler(
+    name="ratio",
+    f=\(q) decoupler_ratio(q,m),
+    f_prime_q=\(q) decoupler_ratio_prime_q(q,m),
+    f_increasing=\() increasing_matrix,
+    D=ncol(m),
+    f_inverse=\(z) decoupler_ratio_inverse(z,m)
+  )
+}
+
+get_ratio_decoupler <- function() {
+  return(
+    new_decoupler(
+      name="ratio decoupler",
+      f=decoupler_ratio,
+      f_prime_q=decoupler_ratio_prime_q,
+      f_increasing=decoupler_ratio_increasing,
+      fix_m = decoupler_ratio_fix_m,
+      f_inverse=decoupler_ratio_inverse,
+      short_name="q/m"
+    )
+  )
+}
 
 ##### CDF error
 indep_CDF <- function(q, m, overshoot=0.1, k_percentiles=c(5,50,95), scale="linear", support_restriction=NULL){
@@ -766,16 +826,17 @@ get_cdf_indep_function_fix_m <- function(m, overshoot=0.1, k_percentiles = c(5,5
 
 ###### Sigmoid functions to compose above error functions with
 
-sigmoid_centered_image <- function(x, L, x_0, k) {
+shifted_sigmoid <- function(x, L, x_0, k) {
+  # if x is Inf or -Inf return L/2 and -L/2 respectively
   return(L / (1 + exp(-k * (x - x_0))) - L / 2)
 }
 
-sigmoid_centered_prime <- function(x, L, x_0, k) {
+shifted_sigmoid_prime <- function(x, L, x_0, k) {
   exp_val = exp(-k * (x - x_0))
   return(k * L * exp_val / (1 + exp_val)^2)
 }
 
-sigmoid_centered_image_inverse <- function(y, L, x_0, k) {
+shifted_sigmoid_inverse <- function(y, L, x_0, k) {
   return(x_0 - log(L / (y + L / 2) - 1) / k)
 }
 
@@ -783,16 +844,16 @@ sigmoid_centered_image_inverse_prime <- function(y, L, x_0, k) {
   return(4*L/(k*(L - 2*y)*(L+2*y)))
 }
 
-get_sigmoid_q_over_m_error_metric <- function(k=1) {
-  error_metric <- get_q_over_m_error_metric()
-  L=2
+get_sigmoid_ratio_decoupler <- function(k=6e-2) {
+  decoupler <- get_ratio_decoupler()
+  L=1
   x_0 = 1
-  compose_sigmoid_with_error(error_metric,
-                             sigmoid=purrr::partial(sigmoid_centered_image, L=L, x_0=x_0, k=k),
-                             sigmoid_prime=purrr::partial(sigmoid_centered_prime, L=L, x_0=x_0, k=k),
-                             sigmoid_inverse = purrr::partial(sigmoid_centered_image_inverse, L=L, x_0=x_0, k=k),
-                             sigmoid_inverse_prime = purrr::partial(sigmoid_centered_image_inverse_prime, L=L, x_0=x_0, k=k)
+  compose_sigmoid_with_decoupler(decoupler,
+                             sigmoid=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
+                             sigmoid_prime=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
+                             sigmoid_inverse = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k)
   )
+
 }
 
 get_sigmoid_linear_error_metric <- function(k=0.05) {
@@ -800,9 +861,9 @@ get_sigmoid_linear_error_metric <- function(k=0.05) {
   L=2
   x_0 = 0
   compose_sigmoid_with_error(error_metric,
-                             sigmoid=purrr::partial(sigmoid_centered_image, L=L, x_0=x_0, k=k),
-                             sigmoid_prime=purrr::partial(sigmoid_centered_prime, L=L, x_0=x_0, k=k),
-                             sigmoid_inverse = purrr::partial(sigmoid_centered_image_inverse, L=L, x_0=x_0, k=k),
+                             sigmoid=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
+                             sigmoid_prime=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
+                             sigmoid_inverse = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k),
                              sigmoid_inverse_prime = purrr::partial(sigmoid_centered_image_inverse_prime, L=L, x_0=x_0, k=k)
   )
 
@@ -813,74 +874,69 @@ get_sigmoid_relative_error_metric <- function(k=0.05) {
   L=2
   x_0 = 0
   compose_sigmoid_with_error(error_metric,
-                             sigmoid=purrr::partial(sigmoid_centered_image, L=L, x_0=x_0, k=k),
-                             sigmoid_prime=purrr::partial(sigmoid_centered_prime, L=L, x_0=x_0, k=k),
-                             sigmoid_inverse = purrr::partial(sigmoid_centered_image_inverse, L=L, x_0=x_0, k=k),
+                             sigmoid=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
+                             sigmoid_prime=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
+                             sigmoid_inverse = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k),
                              sigmoid_inverse_prime = purrr::partial(sigmoid_centered_image_inverse_prime, L=L, x_0=x_0, k=k)
   )
-
 }
 
-chain_rule <- function(outer_prime, inner, inner_prime) {
-  chained_fun <- function(...) {
-    args_list = list(...)
-    inner_vals <- rlang::inject(inner(!!!args_list))
-    inner_prime_vals <- rlang::inject(inner_prime(!!!args_list))
-    return(outer_prime(inner_vals) *inner_prime_vals)
-  }
-  return(chained_fun)
-}
-
-chain_rule_mqd <- function(outer_prime, inner, inner_prime) {
-  return(function(m, q, d) {
-    return(outer_prime(inner(m,q,d)) * inner_prime(m,q,d))
-  })
-}
-
-chain_rule_mq <- function(outer_prime, inner, inner_prime) {
-  return(function(m, q) {
-    return(outer_prime(inner(m,q)) * inner_prime(m,q))
-  })
+get_sigmoid_linear_decoupler <- function(k=0.05) {
+  decoupler <- get_linear_decoupler()
+  L=1
+  x_0 = 0
+  compose_sigmoid_with_decoupler(decoupler,
+                             sigmoid=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
+                             sigmoid_prime=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
+                             sigmoid_inverse = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k)
+                             )
 }
 
 #' Title
 #'
-#' @param error_metric
+#' @param decoupler
 #' @param sigmoid Should be an increasing function
 #' @param sigmoid_prime
 #' @param sigmoid_inverse
-#' @param sigmoid_inverse_prime
 #'
 #' @returns
 #' @export
 #'
 #' @examples
-compose_sigmoid_with_error <- function(error_metric, sigmoid, sigmoid_prime, sigmoid_inverse, sigmoid_inverse_prime) {
+compose_sigmoid_with_decoupler <- function(decoupler, sigmoid, sigmoid_prime, sigmoid_inverse) {
+  checkmate::assert_class(decoupler, "decoupler")
 
-  f_inverse_q <- if (is.null(error_metric$f_inverse_q))  NULL else \(m,e) {
-    error_metric$f_inverse_q(m, sigmoid_inverse(e))
-    }
-
-  f_prime_inverse_q=\(m,e) {
-    error_metric$f_prime_inverse_q(m, sigmoid_inverse(e)) * sigmoid_inverse_prime(e)
+  f <- \(q,m) {
+    sigmoid(decoupler$f(q, m))
   }
 
-  f_single_inverse_q=\(m,e, d) {
-    error_metric$f_single_inverse_q(m, sigmoid_inverse(e), d)
+  f_inverse <- if (is.null(decoupler$f_inverse))  NULL else \(z,m) {
+    decoupler$f_inverse(sigmoid_inverse(z), m)
   }
 
-  new_error_metric(glue::glue("{error_metric$name} with sigmoid"),
-                   f_single=purrr::compose(sigmoid, error_metric$f_single),
-                   f=purrr::compose(sigmoid, error_metric$f),
-                   f_single_prime_m=chain_rule(sigmoid_prime, error_metric$f_single, error_metric$f_single_prime_m),
-                   f_prime_m=chain_rule(sigmoid_prime, error_metric$f, error_metric$f_prime_m),
-                   f_prime_inverse_q=f_prime_inverse_q,
-                   f_single_increasing_q=error_metric$f_single_increasing_q,
-                   f_increasing_q=error_metric$f_increasing_q,
-                   f_single_inverse_q=f_single_inverse_q,
-                   f_inverse_q=f_inverse_q,
-                   check_domain=error_metric$check_domain,
-                   d=error_metric$d
+  f_prime_q <- \(q,m) {
+    sigmoid_prime(decoupler$f(q, m)) * decoupler$f_prime_q(q, m)
+  }
+
+  fix_m <- \(m) {
+    fixed_decoupler <- decoupler$fix_m(m)
+    new_fixed_decoupler(
+      name=glue::glue("{decoupler$name} with sigmoid"),
+      f = \(q) sigmoid(fixed_decoupler$f(q)),
+      f_prime_q= \(q) sigmoid_prime(fixed_decoupler$f(q)) * fixed_decoupler$f_prime_q(q),
+      f_increasing=fixed_decoupler$f_increasing,
+      D=fixed_decoupler$D,
+      f_inverse= if (is.null(fixed_decoupler$f_inverse)) NULL else \(z) fixed_decoupler$f_inverse(sigmoid_inverse(z))
+    )
+  }
+
+  new_decoupler(glue::glue("{decoupler$name} with sigmoid"),
+                   f=f,
+                   f_prime_q = f_prime_q,
+                   f_increasing = decoupler$f_increasing,
+                    fix_m =fix_m,
+                   f_inverse=f_inverse,
+                short_name = glue::glue("s({decoupler$short_name})")
                    )
 
 }

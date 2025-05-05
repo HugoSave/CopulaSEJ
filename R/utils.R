@@ -115,20 +115,20 @@ flatten_3d_array_to_matrix <- function(arr) {
   mat
 }
 
-assessment_array_to_indep_obs <- function(assessments, realizations, indep_fun) {
+assessments_to_decoupler_observations <- function(assessments, realizations, indep_fun) {
   checkmate::assert_array(assessments, d=3)
   checkmate::assert_numeric(realizations)
   checkmate::assert_function(indep_fun)
+  stopifnot(dim(assessments)[1] == length(realizations))
   N = dim(assessments)[1]
   E = dim(assessments)[2]
   D = dim(assessments)[3]
-  checkmate::assert_set_equal(N, length(realizations))
 
-  over_Q_estimates <- purrr::array_branch(assessments, 1) # list with Exd matrices
+  over_Q_estimates <- purrr::array_branch(assessments, 1) # list with ExD matrices
 
   errors <- purrr::map2(over_Q_estimates, realizations, \(estimates, realization) {
-    error_values <- indep_fun(realization, estimates) # an 1xExd matrix
-  }) |> abind::abind(along=1) # NxExd
+    error_values <- indep_fun(realization, estimates) # an 1xExD matrix
+  }) |> abind::abind(along=1) # NxExD
 
   #errors <- errors |> aperm(c(3,1,2)) # NxExD
 

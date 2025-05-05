@@ -53,17 +53,29 @@ bicopula_smoothing_limits <- function(family) {
   list(lower=lower, upper=upper)
 }
 
-partition_errors_disjoint <- function(error_matrix, threshold=0.7) {
-  stopifnot(length(dim(error_matrix)) == 2)
+calculate_adjacency_matrix <- function(error_matrix, method="kendall", threshold=0.7) {
   # we want to find groups of errors that are disjoint
   # determine the correlation between experts
-  cor_matrix <- copula::corKendall(error_matrix)
+  if (method == "kendall") {
+    cor_matrix <- copula::corKendall(error_matrix)
+  } else if (method == "pearson") {
+    cor_matrix <- stats::cor(error_matrix, method="pearson")
+  } else {
+    stop(paste("Unknown method", method))
+  }
   adjacency_matrix <- cor_matrix
-  # set the diagonal to 0
   diag(adjacency_matrix) <- 0
   # set values with abs value less than threshold to 0 and other to 1
   adjacency_matrix[abs(cor_matrix) < threshold] <- 0
   adjacency_matrix[abs(cor_matrix) >= threshold] <- 1
+  adjacency_matrix
+}
+
+partition_errors_disjoint <- function(error_matrix, method="kendall", threshold=0.7) {
+  stopifnot(length(dim(error_matrix)) == 2)
+  # we want to find groups of errors that are disjoint
+  # determine the correlation between experts
+  adjacency_matrix <- calculate_adjacency_matrix(error_matrix, method=method, threshold=threshold)
   graph <- igraph::graph_from_adjacency_matrix(adjacency_matrix, mode = "undirected", diag = FALSE)
   igraph::components(graph)
 }
@@ -137,7 +149,6 @@ wrap_copula <- function(copula) {
   } else {
     stop(paste("Unknown copula type", class(copula)))
   }
-
 }
 
 # error_obs is nx(d*E) matrix (n questions, d * E errors)
@@ -245,15 +256,7 @@ fit_copula <- function(error_obs, copula_model = "joe",
       upper=upper
     )
   }
-  #fitted_param <- optim(alpha_start, loglikCopula, lower=lower, upper=upper,
-  #      method = "L-BFGS-B", copula = copula_model, u = pseudo_obs)
 
-  # Sometimes a specific starting value is needed for convergence, sometimes not.
-  # fitted_params <- fitCopula(copula_model, psuedo_obs, method = "ml", start=1)
-
-  # copula_model@parameters <- coef(fitted_params)
-  #tau(copula_model)
-  #print(cor(wide_df, method = "kendall"))
   wrap_copula(fitted_params@copula)
 }
 
@@ -296,6 +299,15 @@ add_0_and_100_percentiles <- function(data,
                   `100th percentile` = support_df$U_star)
 }
 
+add_0_and_100_percentiles_matrix <- function(quantiles, overshoot=0.1, support_restriction=NULL) {
+  checkmate::assert_matrix(quantiles, "numeric")
+  checkmate::assert_number(overshoot, lower=0)
+  checkmate::assert_string(support_restriction, null.ok=TRUE)
+  support <- range(quantiles)
+  support <- widen_support(support, overshoot=overshoot, support_restriction = support_restriction)
+  # add the 0th and 100th percentiles
+  cbind(support[1], quantiles, support[2])
+}
 
 
 #' Constructs the error distribution from JC assumption. I actually don't think
@@ -332,20 +344,6 @@ construct_error_distribution_JC_assumption <- function(distribution, error_metri
          support = error_support)
   })
   error_distributions
-}
-
-
-
-find_median_of_fun <- function(fun, support) {
-  N = 1000
-  param_mesh <- seq(support[1], support[2], length.out = N)
-  # pick the guess that maximizes the posterior
-  y <- fun(param_mesh)
-  # calculate the cum
-  cum_area <- cumsum(y) * ((support[2] - support[1]) / (N - 1))
-  # find the median
-  median_guess <- param_mesh[which.min(abs(cum_area - 0.5))]
-  median_guess
 }
 
 
@@ -451,6 +449,48 @@ get_error_margins_min_max <- function(flattened_errors) {
   })
 }
 
+load_stan_model_beta_hiarch <- function() {
+  # load the stan model
+  stan_model <- system.file("stan", "beta_hierarchical_model.stan", package = "CopulaSEJ")
+  stan_model
+}
+
+estimate_margin_beta_hiarch <- function(obs_vec, support, alpha_a=10, beta_a=alpha_a, alpha_b=alpha_a, beta_b=alpha_a) {
+  support_width <- support[2] - support[1]
+  stopifnot(support_width == 1)
+  zero_to_one_obs <- obs_vec - support[1]
+
+  model <- load_stan_model()
+  N = length(obs_vec)
+  data_list <- list(
+    N = N,
+    Z = zero_to_one_obs,
+    alpha_a = alpha_a,
+    beta_a = beta_a,
+    alpha_b = alpha_b,
+    beta_b = beta_b
+  )
+
+  fit_map <- rstan::optimizing(
+    mod,
+    data = data_list
+  )
+  fit_map
+
+  map_a <- fit_map$par[[1]]
+  map_b <- fit_map$par[[2]]
+
+  pdf <- function(e_vec, log=FALSE) {
+    extraDistr::dnsbeta(e_vec, map_a, map_b, min=support[1], max=support[2], log=log)
+  }
+
+  cdf <- function(e_vec) {
+    extraDistr::pnsbeta(e_vec, map_a, map_b, min=support[1], max=support[2])
+  }
+
+  list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(map_a, map_b))
+}
+
 
 #' Title
 #'
@@ -516,28 +556,40 @@ estimate_margin_beta <- function(obs_vec, support=NULL, overshoot=0.1, out_of_bo
   }
 
 
-  if (shape1 >1 && shape2 > 1) {
-    mode_standard <- (shape1 - 1)/(shape1 + shape2 - 2) # formula for mode of standard beta distribution
-    scaled_mode <- support[1] + mode_standard * (support[2] - support[1])
-    approx_middle <- scaled_mode
-  } else {
-    mean_standard <- (shape1/(shape1 + shape2)) # formula for mean of standard beta distribution
-    scaled_mean <- support[1] + mean_standard * (support[2] - support[1])
-    approx_middle <- scaled_mean
-  }
-
-  list(pdf = pdf, cdf = cdf, support = support, approx_middle=approx_middle)
+  list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(shape_1, shape_2))
 }
 
-estimate_margin_kde <- function(obs, support, bw="SJ") {
+beta_approx_middel <- function(shape1, shape2) {
+  if (shape1 > 1 && shape2 > 1) {
+    mode_standard <- (shape1 - 1)/(shape1 + shape2 - 2) # formula for mode of standard beta distribution
+    return(mode_standard)
+  } else {
+    mean_standard <- (shape1/(shape1 + shape2)) # formula for mean of standard beta distribution
+    return(mean_standard)
+  }
+
+}
+
+estimate_margin_kde <- function(obs, support, bw="SJ", package="stats") {
   if (!is.null(support)) {
-    kde <- stats::density.default(obs, bw = bw, kernel="gaussian", from=support[1], to=support[2])
+    if (package=="stats") {
+      kde <- stats::density.default(obs, bw = bw, kernel="gaussian", from=support[1], to=support[2])
+    } else if (package=="ks") {
+      kde <- ks::kde.boundary(obs, xmin=support[1], xmax=support[2], h=bw, compute.cont=FALSE)
+    } else {
+      stop("Unknown package for kde")
+    }
   } else {
     kde <- stats::density.default(obs, bw = bw, kernel="gaussian")
   }
 
-  x <- kde$x
-  y <- kde$y
+  if (package=="ks") {
+    x <- kde$eval.points
+    y <- kde$estimate
+  } else {
+    x <- kde$x
+    y <- kde$y
+  }
   # emperical cdf y values
   y_cdf = cumsum(y) / cumsum(y)[length(y)]
 
@@ -547,7 +599,11 @@ estimate_margin_kde <- function(obs, support, bw="SJ") {
     approx(x, y, e_vec, method="linear", yleft=0, yright=0)$y
   }
   # because of the cut off with the support, it is not guaranteed the area is 1 so we normalize it here.
-  area <-  integrate(pdf, min(x), max(x))$value
+  if (package=="ks") {
+    area = 1 # advantage of ks package is that it is normalized properly even when boundary is set
+  } else {
+    area <-  integrate(pdf, min(x), max(x))$value
+  }
   pdf_normalized <- function (e_vec) {
     pdf(e_vec) / area
   }
@@ -571,10 +627,15 @@ estimate_margin_kde <- function(obs, support, bw="SJ") {
 #' @examples
 estimate_margins <- function(observations, supports=NULL, method="beta", overshoot=0.1, out_of_boundary="clamp", bw="SJ") {
   checkmate::assert_matrix(observations, "numeric")
-  checkmate::assert_list(supports, null.ok=TRUE, len = ncol(observations), any.missing = FALSE, types = c("numeric"))
-
-  # if null then fill with NULL
-  if (is.null(supports)) {
+  checkmate::assert(
+    checkmate::check_list(supports, null.ok=TRUE, len = ncol(observations), any.missing = FALSE, types = c("numeric")),
+    checkmate::check_numeric(supports, len = 2, any.missing = FALSE, finite=TRUE),
+  )
+  if (is.numeric(supports)) { # if a single support, replicate it for all columns
+    supports <- rep(list(supports), ncol(observations))
+  }
+  else if (is.null(supports)) {
+    # if null then fill with NULL
     supports <- rep(NULL, ncol(observations))
   }
 
@@ -582,10 +643,12 @@ estimate_margins <- function(observations, supports=NULL, method="beta", oversho
     obs <- observations[, i]
     if (method == "beta"){
       return(estimate_margin_beta(obs, supports[[i]], overshoot, out_of_boundary=out_of_boundary))
-    }
-    if (method =="kde") {
+    } else if (method =="kde") {
       return(estimate_margin_kde(obs, supports[[i]], bw=bw))
-    } else {
+    } else if (method == "beta_hierarchical") {
+      return(estimate_margin_beta_hiarch(obs, supports[[i]]))
+    }
+    else {
       stop(glue::glue("Unknown method: {method}"))
     }
 
@@ -737,7 +800,7 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
     warining=c("ONE_EXPERT")
   }
 
-  decouple_values <- assessment_array_to_indep_obs(training_estimates, training_realizations, decoupler$f)
+  decouple_values <- assessments_to_decoupler_observations(training_estimates, training_realizations, decoupler$f)
   decouple_flattened <- flatten_3d_array_to_matrix(decouple_values)
 
   target_q_support <- target_q_support_from_test_assessments(test_matrix)

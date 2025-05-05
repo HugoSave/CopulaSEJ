@@ -72,13 +72,6 @@ test_that("calculate_marginal_posteriors works out of boundary", {
   expect_equal(cdf_right, matrix(1, nrow=nr_supports, ncol=100))
 })
 
-test_that("find_median_of_fun returns correct value", {
-  fun <- function(x) {
-    dnorm(x, mean = 1, sd = 1)
-  }
-  expect_equal(find_median_of_fun(fun, c(-5, 5)), 1, tolerance=1e-2)
-})
-
 test_that("find_target_q_support works", {
   error_supports <- list(
     c(5,10),

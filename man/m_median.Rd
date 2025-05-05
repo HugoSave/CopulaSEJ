@@ -2,7 +2,7 @@
 % Please edit documentation in R/summarizing_functions.R
 \name{m_median}
 \alias{m_median}
-\title{Extracts the median from a set of assessments}
+\title{Extracts}
 \usage{
 m_median(assessments)
 }
@@ -17,5 +17,5 @@ m_median(assessments)
 }
 }
 \description{
-Extracts the median from a set of assessments
+Extracts
 }

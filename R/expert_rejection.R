@@ -66,7 +66,7 @@ p_values_test <- function(estimates, realizations, test="kruskal", decoupler=NUL
   }
   else if (test == "distance_correlation") {
     checkmate::assert_class(decoupler, "decoupler")
-    decoupled_vals <- assessment_array_to_indep_obs(estimates, realizations, decoupler$f)
+    decoupled_vals <- assessments_to_decoupler_observations(estimates, realizations, decoupler$f)
     return(p_values_distance_correlation(estimates, decoupled_vals))
   }
   else {
@@ -143,7 +143,7 @@ p_values_classical_calibration <- function(estimates, realizations) {
 # Here we test against the null hypothesis that the distribution for the decoupled
 # random variable is the same for all questions.
 p_values_kruskal <- function(estimates, realizations, decoupler) {
-  decoupled_vals <- assessment_array_to_indep_obs(estimates, realizations, decoupler$f)
+  decoupled_vals <- assessments_to_decoupler_observations(estimates, realizations, decoupler$f)
   if (dim(decoupled_vals)[3] != 1) {
     stop("The decoupler must return a single value for each expert for the kruskal test. It is a univarate test.")
   }

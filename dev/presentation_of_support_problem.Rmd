@@ -14,13 +14,13 @@ summ_fun <- get_three_quantiles_summarizing_function()$f
 # Example partioning metric
 
 ```{r}
-study <- studies[[2]]
+study <- studies[[4]]
 test_question_id <- 2
 test_set <- study |> filter(question_id == test_question_id)
 training_set <- study |> filter(question_id != test_question_id)
 test_m_matrix <- test_set |> study_df_single_question_to_summary_matrix(summ_fun, k_percentiles)
 training_assessments <- training_set |> study_df_to_summary_array(summ_fun, k_percentiles)
-cdf_metric <- get_CDF_decoupler(scale="linear", support_restriction = "non_negative")
+cdf_metric <- get_CDF_decoupler(scale="linear", support_restriction = NULL)
 
 ```
 ```{r}
@@ -31,7 +31,7 @@ res <- fit_and_construct_posterior_indep(
         cdf_metric,
         "vine",
         vine_fit_settings = list(),
-        error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=1),
+        error_estimation_settings = list(out_of_boundary="clamp", method="beta_hierarchical", bw=1),
         q_support_restriction = NULL,
         connection_threshold =  0.8
       )
@@ -56,12 +56,13 @@ plot(density(s))
 ```{r}
 study <- filter_study_keep_ids(studies, 43)[[1]]
 study <- change_small_value_in_study_list(list(study), k_percentiles_to_colname(k_percentiles), min_value=0.01)$study_list[[1]]
+
 test_question_id <- 10
 test_set <- study |> filter(question_id == test_question_id)
 training_set <- study |> filter(question_id != test_question_id)
 test_m_matrix <- test_set |> study_df_single_question_to_summary_matrix(summ_fun, k_percentiles)
 training_assessments <- training_set |> study_df_to_summary_array(summ_fun, k_percentiles)
-cdf_metric <- get_CDF_decoupler(scale="linear", support_restriction = "non_negative")
+cdf_metric <- get_CDF_decoupler(scale="linear", support_restriction = NULL)
 
 
 ```
@@ -74,7 +75,7 @@ res <- fit_and_construct_posterior_indep(
         "vine",
         vine_fit_settings = list(),
         error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=1),
-        q_support_restriction = "non_negative"
+        q_support_restriction = NULL
       )
 
 error_margins <- res$error_margins |> 

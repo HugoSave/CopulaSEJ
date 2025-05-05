@@ -13,7 +13,7 @@ load_data_49 <- function(relative_dev_folder=TRUE) {
 load_data_49_filtered <- function(relative_dev_folder=TRUE) {
   studies <- load_data_49(relative_dev_folder)
   studies <- studies |> filter_studies_few_questions(min_questions = 11)
-  data_list_form <- change_value_in_study_list(studies, k_percentiles_to_colname(c(5, 50, 95)), 0, 0.001)$study_list
+  data_list_form <- change_value_in_study_list(studies, CopulaSEJ:::k_percentiles_to_colname(c(5, 50, 95)), 0, 0.0005)$study_list
 }
 
 combine_lists_of_functions_to_function <- function(densities_list) {

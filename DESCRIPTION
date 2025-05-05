@@ -26,7 +26,8 @@ Imports:
     BayesianTools,
     ks,
     matrixStats,
-    igraph
+    igraph,
+    patchwork
 Suggests: 
     testthat (>= 3.0.0)
 Config/testthat/edition: 3

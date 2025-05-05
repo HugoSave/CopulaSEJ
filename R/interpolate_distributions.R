@@ -89,6 +89,8 @@ log_linear_distribution_interpolation <- function(x, cdf_values) {
 linear_distribution_interpolation <- function(x, cdf_values) {
   checkmate::assert_numeric(x, finite=TRUE, unique=TRUE, sorted=TRUE)
   checkmate::assert_numeric(cdf_values, lower=0, upper=1, sorted=TRUE)
+  stopifnot(0 %in% cdf_values)
+  stopifnot(1 %in% cdf_values)
   # Linear interpolation for the CDF
   cdf_function <- approxfun(x, cdf_values, method = "linear", ties = "ordered", yleft=0, yright=1)
 

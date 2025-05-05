@@ -1,0 +1,122 @@
+---
+title: "plots_report"
+output: html_document
+---
+
+Here we compile plots that are to be used for the report
+
+```{r setup, echo=FALSE, message=FALSE}
+library(ggplot2)
+library(dplyr)
+library(CopulaSEJ)
+source("dev_utils.R")
+
+studies <- load_data_49()
+
+# set font size for plots
+theme_set(theme_classic(base_size = 14))
+theme_set(theme_bw(base_size = 14))
+
+
+```
+
+
+```{r}
+# see number of calibration questions per study
+question_df <- studies |> purrr::map(\(df) {
+  df |> select(study_id, question_id) |>
+    distinct() |> group_by(study_id) |> summarise(n_questions = n()) 
+}) |> purrr::list_rbind()
+
+breaks <- question_df |> 
+  summarise(min = min(study_id), max = max(study_id)) |> 
+  unlist() |> as.numeric()
+
+questions_per_study <-question_df |> 
+  ggplot(aes(x = study_id, y = n_questions)) +
+  geom_col() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(x = "Study ID", y = "Number of calibration questions")  + 
+  scale_x_continuous(breaks = seq(breaks[1], breaks[2], 1), minor_breaks=NULL)
+questions_per_study
+
+question_histogram <- question_df |> 
+  ggplot(aes(x = n_questions)) +
+  geom_histogram(binwidth = 1) +
+  labs(x = "Number of calibration questions", y = "Number of studies") +
+  scale_x_continuous(breaks = seq(0, max(question_df$n_questions), 1), minor_breaks=NULL)+
+  ylim(c(0,NA))
+question_histogram
+ggsave("output/question_histogram.pdf", 
+       question_histogram, 
+       width = 10, height = 5, dpi = 300)
+
+```
+
+# Expert who always over and underestimated a question
+```{r}
+study_id <- 43
+study <- filter_study_keep_ids(studies, study_id)[[1]]
+summ_fun <- get_three_quantiles_summarizing_function()$f
+k_percentiles <- c(5,50,95)
+training_assessments <- study |> study_df_to_summary_array(summ_fun, k_percentiles)
+training_realizations <- study |> study_df_to_realizations()
+decoupler <- get_CDF_decoupler(overshoot = 0.1)
+
+expert_of_interest <- 6
+dists<-distributions_from_percentile_matrix(training_assessments[,expert_of_interest,])$distributions
+plot_distributions(dists, "pdf")
+
+# plot estimated PDFs
+df <- study |> filter(expert_id==expert_of_interest)
+# rotate x text
+exp_of_interest_plot <- ggplot(df, aes(x=`5th percentile`, y=1)) +
+  geom_text(aes(label="[", group="5th percentile"))  +
+  geom_text(aes(x=`50th percentile`, label="|"), group="50th percentile")  +
+  geom_text(aes(x=`95th percentile`, label="]", group="95th percentile"))  +
+  geom_point(aes(x=`realization`, color="red", group="Realization")) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  scale_y_continuous(name=NULL,labels=NULL, breaks=NULL) +
+  scale_x_continuous(name="Question") +
+  scale_color_discrete(guide="none", name="Marker") +
+  facet_wrap(vars(question_id), scales="free_x", ncol=5) #, space="free_x") 
+exp_of_interest_plot
+ggsave("output/expert_of_interest.pdf", 
+       exp_of_interest_plot, 
+       width = 10, height = 5, dpi = 300)
+
+
+```
+
+```{r}
+Z_obs <- assessments_to_decoupler_observations(training_assessments, training_realizations, decoupler$f)
+
+# 
+Z_obs[,6,,drop=FALSE] |> plot_3d_errors()  
+
+```
+```{r}
+Z_only_ones <- rep(0.9, 10)
+bws = c(0.05, 0.1, 0.2, 0.5, 0.8)
+margins <- purrr::map(bws, function(bw) {
+  estimate_margin_kde(Z_obs[,6,1], support=c(0,1), bw=bw, package="stats")
+})
+margins_only_ones <- purrr::map(bws, function(bw) {
+  estimate_margin_kde(Z_only_ones, support=c(0,1), bw=bw, package="stats")
+})
+margins |> plot_distributions("pdf")
+margins_only_ones |> plot_distributions("pdf")
+margins <- CopulaSEJ::estimate_margins(Z_obs[,,1], supports=c(0,1), method="kde", bw=0.01)
+bw = KernSmooth::dpik(Z_obs[,6,1])
+margin <- estimate_margin_kde(Z_obs[,6,1], support=c(0,1), bw=ks::hpi(Z_obs[,6,1]), package="stats")
+bw_hpi <- list(margin) |> plot_distributions("pdf") + scale_color_discrete(guide="none")
+margin2 <- estimate_margin_kde(Z_obs[,6,1], support=c(0,1), bw=0.5, package="ks") 
+kde <- ks::kde.boundary(Z_obs[,6,1], xmin=0, xmax=1, h=0.5, compute.cont=FALSE, boundary.kernel="beta")
+plot(kde)
+margin2$pdf(0)
+bw_05 <- estimate_margin_kde(Z_obs[,6,1], support=c(0,1), bw=0.5, package="ks") |> list() |> plot_distributions("pdf") + scale_color_discrete(guide="none")
+x = seq(from=0, to=1, length.out=100)
+y = margins[[2]]$pdf(x)
+integrate(margin$pdf, lower=0, upper=1)
+```
+

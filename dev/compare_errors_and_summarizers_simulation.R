@@ -65,19 +65,22 @@ connection_threshold_shortname <- function(connection_threshold) {
 
 parameter_shortname <- function(sim_params, sep="") {
   if (sim_params$prediction_method == "density_product") {
-    stopifnot(!is.null(sim_params$copula_model))
+    paste(prediction_method_shortname(sim_params$prediction_method),
+          sim_params$overshoot,
+          sep=sep)
+  } else {
+    paste(
+      prediction_method_shortname(sim_params$prediction_method),
+      copula_shortname(sim_params$copula_model),
+      sim_params$error_metric$short_name,
+      sim_params$summarizing_function$short_name,
+      rejection_shortname(sim_params$rejection_test,
+                          sim_params$rejection_threshold,
+                          sim_params$rejection_min_experts),
+      connection_threshold_shortname(sim_params$connection_threshold),
+      sep=sep
+    )
   }
-  paste(
-    prediction_method_shortname(sim_params$prediction_method),
-    copula_shortname(sim_params$copula_model),
-    sim_params$error_metric$short_name,
-    sim_params$summarizing_function$short_name,
-    rejection_shortname(sim_params$rejection_test,
-                        sim_params$rejection_threshold,
-                        sim_params$rejection_min_experts),
-    connection_threshold_shortname(sim_params$connection_threshold),
-    sep=sep
-  )
 }
 
 get_latest_sim_nr <- function() {
