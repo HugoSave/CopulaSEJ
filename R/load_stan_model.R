@@ -2,12 +2,10 @@
 # to C++ code before being used. This can take some time. The .stan_cache environment can be used to
 # to cache an already compiled model.
 
+.stan_cache <- new.env(parent = emptyenv())
 
 load_stan_model <- function(load_precompiled = TRUE, precompiled_model_path = "beta_hiearchical.rds", save_compiled=TRUE, save_compiled_path = "beta_hiearchical.rds",
                            force_compilation=FALSE) {
-  if (!exists(".stan_cache", mode="environment")) {
-    .stan_cache <- new.env()
-  }
   model_name = "beta_hierarchical"
   model_file_names <- paste0(model_name, ".stan")
   # Use cache if model already compiled

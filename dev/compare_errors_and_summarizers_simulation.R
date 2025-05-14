@@ -26,7 +26,6 @@ rejection_shortname <- function(rejection_test, rejection_threshold, rejection_m
     return(rejection_test)
   }
   return(glue::glue("{prefix}({rejection_threshold},{rejection_min_experts})"))
-
 }
 
 prediction_method_shortname <- function(prediction_method) {
@@ -161,9 +160,10 @@ run_study_find_posterior <- function(studies, params, sim_group="tmp"){
 
 sample_and_add_metrics <- function(analys_res) {
   df <- analys_res$results
-  list_of_metrics <- purrr::map2(df$posterior, df$realization, \(post, realization) {
-    if (is.null(post)) {
-      return(performance_metrics_list()) # defaults to NA for all metrics
+  browser()
+  list_of_metrics <- purrr::pmap(list(df$posterior, df$realization, df$prediction), \(post, realization, prediction) {
+    if (!is.list(post)) {
+      return(performance_metrics_list()) # defaults to NA for all other metrics
     } else {
       return(posterior_performance_metrics(post$logDM, post$support, realization, num_samples=1000))
     }
@@ -171,10 +171,10 @@ sample_and_add_metrics <- function(analys_res) {
 
   metric_df <- list_of_metrics |> purrr::list_transpose() |> tibble::as_tibble()
   results <- dplyr::bind_cols(df, metric_df)
-  results$prediction <- results$median
+  # results$prediction <- results$median
   results$error = results$prediction - results$realization
   results$rel_error = results$error / results$realization
-  results$support = results$posterior |> purrr::map(\(x) x$support)
+  results$support = results$posterior |> purrr::map(\(x) ifelse(is.na(x), NA, x$support))
   results
 }
 
@@ -190,8 +190,8 @@ if (!interactive()) {
 
   file_name <- "dev/output/data49_nov24.rds"
   numerical_col_names <- c(k_percentiles_to_colname(c(5, 50, 95)), "realization")
-  studies <- readRDS(file_name)
-  studies <- filter_questions_in_studies_non_negative(studies)
+  studies <- load_data_49(relative_dev_folder = FALSE)
+  #studies <- filter_questions_in_studies_non_negative(studies)
   #studies <- filter_studies_support_magnitude_diff(studies, numerical_col_names, max_mag_diff = 10000)
   #studies <- filter_studies_support_diff(studies, numerical_col_names, max_abs_diff = 10000)
   studies <- filter_studies_few_questions(studies, min_questions=11)
@@ -213,6 +213,22 @@ if (!interactive()) {
                           ))
 
   param_list <- push_list(param_list,
+            default_simulation_params(
+              prediction_method = "median_average",
+              summarizing_function = get_three_quantiles_summarizing_function(),
+            ))
+
+  param_list <- push_list(param_list,
+                          default_simulation_params(
+                            prediction_method = "equal_weight"
+                          ))
+
+  param_list <- push_list(param_list,
+                          default_simulation_params(
+                            prediction_method = "classical_model"
+                          ))
+
+  param_list <- push_list(param_list,
     default_simulation_params(
     prediction_method = "copula",
     copula_model = "vine",
@@ -222,12 +238,27 @@ if (!interactive()) {
     error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=1),
     vine_fit_settings = list(family_set = c("onepar","indep"),
                              selcrit="mbicv", threshold=0.7),
-    q_support_restriction = 'non_negative'
+    q_support_restriction = NULL
   ))
+
+  param_list <- push_list(param_list,
+                          default_simulation_params(
+                            prediction_method = "copula",
+                            copula_model = "vine",
+                            error_metric = get_CDF_decoupler(),
+                            summarizing_function = get_three_quantiles_summarizing_function(),
+                            rejection_threshold = NULL,
+                            error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=1),
+                            vine_fit_settings = list(family_set = c("onepar","indep"),
+                                                     selcrit="mbicv", threshold=0.7),
+                            q_support_restriction = NULL #'non_negative'
+                          ))
 
   param_list <- push_list(param_list,
                           modifyList(param_list[[1]],
                                      list(
+                                       vine_fit_settings = list(family_set = c("onepar","indep"),
+                                                                selcrit="mbicv", threshold=0),
                                        connection_threshold=0.8
                                      ))
   )

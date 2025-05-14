@@ -78,15 +78,31 @@ new_error_metric <- function(name,
   ))
 }
 
-new_decoupler <- function(name, f, f_prime_q, f_increasing, fix_m, f_inverse=NULL, short_name=NULL) {
+new_decoupler <- function(name, f, f_prime_q, f_increasing, D_tilde, fix_m=NULL, f_inverse=NULL, short_name=NULL, ideal_mean_var=NULL) {
   checkmate::assert_string(name)
   checkmate::assert_function(f, args=c("q", "m"), ordered=TRUE)
   checkmate::assert_function(f_prime_q, args=c("q", "m"), ordered=TRUE)
   checkmate::assert_function(f_increasing, args=c("m"), ordered=TRUE)
-  checkmate::assert_function(fix_m, args=c("m"), ordered=TRUE)
+  checkmate::assert_function(fix_m, args=c("m"), ordered=TRUE, null.ok=TRUE)
   checkmate::assert_function(f_inverse, args=c("z", "m"), null.ok=TRUE)
   checkmate::assert_string(short_name, null.ok=TRUE)
+  checkmate::assert_function(ideal_mean_var, null.ok=TRUE) # function of m and quantiles (with 0 100 support)
+  checkmate::assert(
+    checkmate::check_function(D_tilde),
+    checkmate::check_count(D_tilde, positive=TRUE),
+    checkmate::check_choice(D_tilde, c("D")),
+  )
   short_name <- if (is.null(short_name)) name else short_name
+  if (is.null(fix_m)) {
+    fix_m = \(m) default_fix_m(m, f, f_prime_q, f_increasing, name, f_inverse)
+  }
+  if (is.character(D_tilde) && D_tilde == "D") {
+    D_tilde_f = \(D) D
+  } else if (is.numeric(D_tilde)) {
+    D_tilde_f = \(D) D_tilde
+  } else {
+    D_tilde_f = D_tilde
+  }
 
   return(structure(
     list(
@@ -96,7 +112,9 @@ new_decoupler <- function(name, f, f_prime_q, f_increasing, fix_m, f_inverse=NUL
       f_prime_q = f_prime_q,
       f_increasing=f_increasing,
       fix_m = fix_m,
-      f_inverse=f_inverse
+      f_inverse=f_inverse,
+      D_tilde=D_tilde_f,
+      ideal_mean_var=ideal_mean_var
     ),
     class = "decoupler"
   ))
@@ -637,10 +655,10 @@ decoupler_linear_inverse <- function(z, m) {
   (z_rep_matrix + m_rep_matrix)
 }
 
-decoupler_linear_fix_m <- function(m) {
+decoupler_linear_fix_m <- function(m, name="linear") {
   increasing_matrix = decoupler_linear_increasing(m)
   new_fixed_decoupler(
-    name="linear",
+    name=name,
     f=\(q) decoupler_linear(q,m),
     f_prime_q=\(q) decoupler_linear_prime_q(q,m),
     f_increasing=\() increasing_matrix,
@@ -649,18 +667,185 @@ decoupler_linear_fix_m <- function(m) {
   )
 }
 
-get_linear_decoupler <- function() {
-  return(
-    new_decoupler(
-      name="linear decoupler",
+preprocess_m_to_median <- function(m) {
+  stopifnot(ncol(m)==3)
+  m[,2,drop=FALSE]
+}
+
+preprocess_m_from_string <- function(m_string) {
+  if (m_string == "median") {
+    return(preprocess_m_to_median)
+  } else if (m_string == "mean_G") {
+    return(\(m) m_mean_estimate(m, quantiles_probs=c(0.05,0.50,0.95), overshoot=0.1, support_restriction = NULL, global_support=TRUE))
+  } else if (m_string == "mean_E") {
+    return(\(m) m_mean_estimate(m, quantiles_probs=c(0.05,0.50,0.95), overshoot=0.1, support_restriction = NULL, global_support=FALSE))
+  } else {
+    stop("Unknown m preprocessing function")
+  }
+}
+
+m_mean_estimate <- function(assessments, quantiles_probs = c(0.05,0.50,0.95), overshoot=0.1, support_restriction=NULL, global_support=FALSE) {
+  stopifnot(overshoot > 0) # some overshoot is needed for the interpolation to make sense
+  if (is.data.frame(assessments)) {
+    assessments = as.matrix(assessments)
+  }
+
+  # check that assessments has 3 cols
+  if (ncol(assessments) != 3) {
+    stop("Assessments must have 3 columns")
+  }
+
+  if (global_support) {
+    quantiles <- add_0_and_100_percentiles_matrix(assessments, overshoot=overshoot, support_restriction=support_restriction)
+  } else {
+    quantiles <- add_0_and_100_percentiles_matrix_per_row(assessments, overshoot=overshoot, support_restriction=support_restriction)
+  }
+
+  means <- estimate_mean_from_quantiles(quantiles, cdf_values=quantiles_probs)
+  matrix(means, nrow=nrow(assessments), ncol=1, dimnames = list(names(means), "mean"))
+}
+
+estimate_mean_from_quantiles <- function(quantiles, cdf_values) {
+  stopifnot(!(0 %in% cdf_values))
+  stopifnot(!(1 %in% cdf_values))
+  D = ncol(quantiles)
+  stopifnot(length(cdf_values) == (D-2))
+  cdf_values <- c(0,cdf_values, 1)
+  cdf_values_diff <- cdf_values[2:D] - cdf_values[1:(D-1)]
+  cdf_values_matrix <- matrix(cdf_values_diff, nrow=nrow(quantiles), ncol=D-1, byrow=TRUE)
+  # check that quantiles has 3 cols
+  Matrix::rowSums(cdf_values_matrix * (quantiles[, 2:D] + quantiles[, 1:(D-1)])) / 2
+}
+
+clamp_vars_for_beta <- function(means_vars, epsilon=1e-6) {
+  vars_limit <- means_vars$means * (1-means_vars$means) # upper limit for variance of a beta function
+  means_vars$vars <- pmin(means_vars$vars, vars_limit)
+  means_vars
+}
+
+get_linear_decoupler <- function(D_tilde, compose_sigmoid=TRUE, m_preprocess=NULL, name=NULL, short_name=NULL, k=0.05, overshoot=0.1) { #6e-3) {
+  checkmate::assert(
+    checkmate::check_function(m_preprocess, null.ok = TRUE),
+    checkmate::check_string(m_preprocess, null.ok = TRUE)
+  )
+  name <- ifelse(is.null(name), "linear decoupler", name)
+  short_name <- ifelse(is.null(short_name), "q-m", short_name)
+
+  decoupler <- new_decoupler(
+      name=name,
       f=decoupler_linear,
       f_prime_q=decoupler_linear_prime_q,
       f_increasing=decoupler_linear_increasing,
       fix_m = decoupler_linear_fix_m,
       f_inverse=decoupler_linear_inverse,
-      short_name="lin"
+      short_name=short_name,
+      D_tilde=D_tilde
     )
+
+  if (!is.null(m_preprocess)) {
+    if (is.character(m_preprocess)) {
+      m_preprocess <- preprocess_m_from_string(m_preprocess)
+    }
+    decoupler <- compose_decoupler_m_preprocessing(m_preprocess, decoupler,
+                                      name=name,
+                                      short_name = short_name)
+  }
+  if (compose_sigmoid) {
+    ideal_mean_var <- \(quantiles) {
+      quantiles_extended <- add_0_and_100_percentiles_matrix(quantiles, overshoot=overshoot)
+      sigmoid_composed_affine_decoupler_ideal_mean_var(decoupler, k=k, m=quantiles, quantiles=quantiles_extended, cum_prob = c(0,0.05, 0.5, 0.95, 1)) |>
+        clamp_vars_for_beta()
+    }
+    L=1
+    x_0 = 0
+    decoupler_composed <- compose_sigmoid_with_decoupler(decoupler,
+                                                         sigmoid_f=purrr::partial(sigmoid, k=k),
+                                                         sigmoid_prime_f=purrr::partial(sigmoid_prime, k=k),
+                                                         sigmoid_inverse_f = purrr::partial(sigmoid_inverse, k=k)
+    )
+    decoupler_composed$ideal_mean_var = ideal_mean_var
+    return(decoupler_composed)
+  }
+
+  decoupler
+}
+
+decoupler_relative <- function(q, m, epsilon=1e-5) {
+  m <- typecheck_and_convert_matrix_vector(m, q)
+  D = ncol(m)
+  E = nrow(m)
+  N = length(q)
+  m_rep_matrix = array(m, dim=(c(E, D, N))) |> aperm(c(3,1,2)) # this flips it to NxExD
+  q_rep_matrix = array(q, dim=(c(N, E, D)))
+  (q_rep_matrix - m_rep_matrix) / (abs(m_rep_matrix) + epsilon)
+}
+
+decoupler_relative_prime_q <- function(q, m, epsilon=1e-6) {
+  m <- typecheck_and_convert_matrix_vector(m, q)
+  D = ncol(m)
+  E = nrow(m)
+  N = length(q)
+  m_rep_matrix = array(m, dim=(c(E, D, N))) |> aperm(c(3,1,2)) # this flips it to NxExD
+  1 / (abs(m_rep_matrix) + epsilon)
+}
+
+decoupler_relative_increasing <- function(m, epsilon=1e-6) {
+  m <- typecheck_and_convert_matrix_vector(m, vector())
+  return(is_positive_no_zero(abs(m)+epsilon))
+}
+
+decoupler_relative_inverse <- function(z, m, epsilon=1e-6) {
+  m <- typecheck_and_convert_matrix_vector(m, z)
+  D = ncol(m)
+  E = nrow(m)
+  N = length(z)
+  m_rep_matrix = array(m, dim=(c(E, D, N))) |> aperm(c(3,1,2)) # this flips it to NxExD
+  z_rep_matrix = array(z, dim=(c(N,E,D)))
+  z_rep_matrix * (abs(m_rep_matrix) + epsilon) + m_rep_matrix
+}
+
+get_relative_decoupler <- function(D_tilde, compose_sigmoid=FALSE, m_preprocess=NULL, name="relative decoupler", short_name="(q-m)/(|m|+e)", k=6e-2, overshoot=0.1) {
+  checkmate::assert(
+    checkmate::check_function(m_preprocess, null.ok = TRUE),
+    checkmate::check_string(m_preprocess, null.ok = TRUE)
   )
+  decoupler <- new_decoupler(
+      name=name,
+      f=decoupler_relative,
+      f_prime_q=decoupler_relative_prime_q,
+      f_increasing=decoupler_relative_increasing,
+      f_inverse=decoupler_relative_inverse,
+      short_name=short_name,
+      D_tilde=D_tilde
+    )
+
+
+  if (!is.null(m_preprocess)) {
+    if (is.character(m_preprocess)) {
+      m_preprocess <- preprocess_m_from_string(m_preprocess)
+    }
+    decoupler <- compose_decoupler_m_preprocessing(m_preprocess, decoupler,
+                                                   name=name,
+                                                   short_name = short_name)
+  }
+  if (compose_sigmoid) {
+    ideal_mean_var <- \(quantiles) {
+      quantiles_extended <- add_0_and_100_percentiles_matrix(quantiles, overshoot=overshoot)
+      sigmoid_composed_affine_decoupler_ideal_mean_var(decoupler, k=k, m=quantiles, quantiles=quantiles_extended, cum_prob = c(0,0.05, 0.5, 0.95, 1)) |>
+        clamp_vars_for_beta()
+    }
+    L=1
+    x_0 = 0
+    decoupler_composed <- compose_sigmoid_with_decoupler(decoupler,
+                                                sigmoid_f=purrr::partial(sigmoid, k=k),
+                                                sigmoid_prime_f=purrr::partial(sigmoid_prime, k=k),
+                                                sigmoid_inverse_f = purrr::partial(sigmoid_inverse, k=k)
+    )
+    decoupler_composed$ideal_mean_var = ideal_mean_var
+    return(decoupler_composed)
+  }
+
+  decoupler
 }
 
 #### Decoupler Ratio
@@ -698,10 +883,10 @@ decoupler_ratio_inverse <- function(z, m) {
   z_rep_matrix * m_rep_matrix
 }
 
-decoupler_ratio_fix_m <- function(m) {
+decoupler_ratio_fix_m <- function(m, name="ratio") {
   increasing_matrix = decoupler_ratio_increasing(m)
   new_fixed_decoupler(
-    name="ratio",
+    name=name,
     f=\(q) decoupler_ratio(q,m),
     f_prime_q=\(q) decoupler_ratio_prime_q(q,m),
     f_increasing=\() increasing_matrix,
@@ -710,16 +895,254 @@ decoupler_ratio_fix_m <- function(m) {
   )
 }
 
-get_ratio_decoupler <- function() {
-  return(
-    new_decoupler(
-      name="ratio decoupler",
+get_ratio_decoupler <- function(D_tilde, compose_sigmoid=FALSE,m_preprocess=NULL,name="ratio decoupler", short_name="Ratio", k=6e-2) {
+  checkmate::assert(
+    checkmate::check_function(m_preprocess, null.ok = TRUE),
+    checkmate::check_string(m_preprocess)
+  )
+  decoupler <- new_decoupler(
+      name=name,
       f=decoupler_ratio,
       f_prime_q=decoupler_ratio_prime_q,
       f_increasing=decoupler_ratio_increasing,
       fix_m = decoupler_ratio_fix_m,
       f_inverse=decoupler_ratio_inverse,
-      short_name="q/m"
+      short_name=short_name,
+      D_tilde=D_tilde
+    )
+
+  if (!is.null(m_preprocess)) {
+    if (is.character(m_preprocess)) {
+      m_preprocess <- preprocess_m_from_string(m_preprocess)
+    }
+    decoupler <- compose_decoupler_m_preprocessing(m_preprocess, decoupler,
+                                                   name=name,
+                                                   short_name = short_name)
+  }
+
+  if (compose_sigmoid) {
+    L=1
+    x_0 = 1
+    decoupler <- compose_sigmoid_with_decoupler(decoupler,
+                                                sigmoid_f=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
+                                                sigmoid_prime_f=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
+                                                sigmoid_inverse_f = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k)
+    )
+  }
+  decoupler
+}
+
+decoupler_ratio_mean <- function(q, m, quantile_probs=c(0.05,0.5,0.95), overshoot=0.1, support_restriction=NULL) {
+  m <- typecheck_and_convert_matrix_vector(m, q)
+  stopifnot(ncol(m) == 3)
+  m_extended <- add_0_and_100_percentiles_matrix(m, overshoot=overshoot, support_restriction=support_restriction)
+  means <- estimate_mean_from_quantiles(m_extended, quantile_probs)
+  decoupler_ratio(q, means)
+}
+
+get_mean_linear_decoupler <- function(global_support=TRUE, quantile_probs=c(0.05,0.5,0.95), overshoot=0.1, support_restriction=NULL) {
+  # here we take 3 quantiles, calculate the mean and then apply the ratio
+  get_means <- function(m) {
+    m_mean_estimate(m, quantiles_probs = quantile_probs, support_restriction=support_restriction, global_support=global_support, overshoot=overshoot)
+  }
+  f <- function(q, m) {
+    means <- get_means(m)
+    decoupler_linear(q, means)
+  }
+  f_prime_q <- function(q, m) {
+    means <- get_means(m)
+    decoupler_linear_prime_q(q, means)
+  }
+  f_increasing <- function(m) {
+    means <- get_means(m)
+    decoupler_linear_increasing(means)
+  }
+  f_inverse <- function(z, m) {
+    means <- get_means(m)
+    decoupler_linear_inverse(z, means)
+  }
+  f_fix_m <- function(m) {
+    means <- get_means(m)
+    decoupler_linear_fix_m(means, "mean linear")
+  }
+  name <- if(global_support) {
+    "mean_G linear decoupler"
+  } else {
+    "mean_E linear decoupler"
+  }
+  short_name <- if(global_support) {
+    "q-Mn_G"
+  } else {
+    "q-Mn_E"
+  }
+  return(
+    new_decoupler(
+      name=name,
+      f=f,
+      f_prime_q=f_prime_q,
+      f_increasing=f_increasing,
+      fix_m = f_fix_m,
+      f_inverse=f_inverse,
+      short_name=short_name,
+      D_tilde=1
+    )
+  )
+}
+
+default_fix_m <- function(m, f, f_prime_q, f_increasing, name, f_inverse=NULL) {
+  D = ncol(f_increasing(m))
+  f_inverse_new <- function(z) {
+    if (is.null(f_inverse)) {
+      NULL
+      }
+    else  {
+      f_inverse(z,m)
+    }
+  }
+  new_fixed_decoupler(
+    name = glue::glue("fixed {name}"),
+    f = \(q) f(q, m),
+    f_prime_q = \(q) f_prime_q(q, m),
+    f_increasing = \() f_increasing(m),
+    D=D,
+    f_inverse = f_inverse_new
+  )
+}
+
+
+compose_decoupler_m_preprocessing <- function(process_m, decoupler, name, short_name) {
+  f <- function(q, m) {
+    m_new <- process_m(m)
+    decoupler$f(q, m_new)
+  }
+  f_prime_q <- function(q,m) {
+    decoupler$f_prime_q(q, process_m(m))
+  }
+  f_increasing <- function(m) {
+    decoupler$f_increasing(process_m(m))
+  }
+  fix_m <- function(m) {
+    decoupler$fix_m(process_m(m))
+  }
+  f_inverse <- if (is.null(decoupler$f_inverse)) {
+    NULL
+  } else {
+    function(z, m) {
+      decoupler$f_inverse(z, process_m(m))
+    }
+  }
+
+  return(
+    new_decoupler(
+      name=name,
+      f=f,
+      f_prime_q = f_prime_q,
+      f_increasing=f_increasing,
+      fix_m=fix_m,
+      f_inverse=f_inverse,
+      short_name=short_name,
+      D_tilde = decoupler$D_tilde
+    )
+  )
+}
+
+
+get_support_ratio_decoupler <- function(global_support=TRUE, quantile_probs=c(0.05,0.5,0.95), overshoot=0.1, support_restriction=NULL) {
+  linear_decoupler <- get_linear_decoupler()
+  ratio_decoupler <- get_ratio_decoupler()
+
+  get_supports_and_means <- function(m) {
+    m <- typecheck_and_convert_matrix_vector(m, vector())
+    stopifnot(ncol(m) == 3)
+    m_extended <- add_0_and_100_percentiles_matrix(m, overshoot=overshoot, support_restriction=support_restriction)
+    L_star <- m_extended[,1]
+    U_star <- m_extended[,ncol(m_extended)]
+
+    means <- estimate_mean_from_quantiles(m_extended, cdf_values=quantile_probs)
+    matrix(c(means, U_star-L_star), nrow=nrow(m_extended), ncol=2, dimnames = list(names(means), c("Mean", "Width")))
+  }
+
+  f <- function(q, m) {
+    mean_errors <- linear_decoupler$f(q, m[,1, drop=FALSE]) # returns NxEx1
+    support_widths <- m[,2,drop=FALSE] # Ex1
+    support_widths <- array(support_widths, dim=c(length(q), nrow(support_widths), 1)) # NxEx1
+    mean_errors/support_widths
+  }
+
+  f_prime_q <- function(q, m) {
+    ratio_decoupler$f_prime_q(q, m[,2])
+  }
+
+  f_increasing <- function(m) {
+    ratio_decoupler$f_increasing(m[,2])
+  }
+
+  f_inverse <- function(z, m) {
+    ratio_inverse <- ratio_decoupler$f_inverse(z, m[,2]) # for each z we get a Ex1 q values
+    ratio_inverse # NxEx1
+    # array of means
+    m_array <- array(m[,1], dim=c(nrow(m), length(z), 1)) |> aperm(c(2,1,3)) # NxEx1
+    ratio_inverse + m_array # invert of linear decoupler
+  }
+
+  tmp_decoupler <- new_decoupler(
+    name = "relative support tmp",
+    f=f,
+    f_prime_q = f_prime_q,
+    f_increasing = f_increasing,
+    f_inverse = f_inverse,
+    D_tilde = 1
+  )
+
+  compose_decoupler_m_preprocessing(get_supports_and_means, tmp_decoupler, "relative support", "(q-Mn_G)/W")
+}
+
+
+get_mean_ratio_decoupler <- function(global_support=TRUE, quantile_probs=c(0.05,0.5,0.95), overshoot=0.1, support_restriction=NULL) {
+  # here we take 3 quantiles, calculate the mean and then apply the ratio
+  get_means <- function(m) {
+    m_mean_estimate(m, quantiles_probs = quantile_probs, support_restriction=support_restriction, global_support=global_support, overshoot=overshoot)
+  }
+  f <- function(q, m) {
+    means <- get_means(m)
+    decoupler_ratio(q, means)
+  }
+  f_prime_q <- function(q, m) {
+    means <- get_means(m)
+    decoupler_ratio_prime_q(q, means)
+  }
+  f_increasing <- function(m) {
+    means <- get_means(m)
+    decoupler_ratio_increasing(means)
+  }
+  f_inverse <- function(z, m) {
+    means <- get_means(m)
+    decoupler_ratio_inverse(z, means)
+  }
+  f_fix_m <- function(m) {
+    means <- get_means(m)
+    decoupler_ratio_fix_m(means, "mean ratio")
+  }
+  name <- if(global_support) {
+    "mean_G ratio decoupler"
+  } else {
+    "mean_E ratio decoupler"
+  }
+  short_name <- if(global_support) {
+    "q/Mn_G"
+  } else {
+    "q/Mn_E"
+  }
+  return(
+    new_decoupler(
+      name=name,
+      f=f,
+      f_prime_q=f_prime_q,
+      f_increasing=f_increasing,
+      fix_m = f_fix_m,
+      f_inverse=f_inverse,
+      short_name=short_name,
+      D_tilde=1
     )
   )
 }
@@ -748,6 +1171,22 @@ decouple_CDF_inverse <- function(z, m, overshoot=0.1, k_percentiles=c(5,50,95), 
   ind_cond_m$f_inverse(z)
 }
 
+uniform_mean_var <- function(E, D) {
+  # corresponds to a uniform distribution
+  uniform_mean <- 0.5
+  uniform_var <- 1/12
+  means <- matrix(uniform_mean, nrow=E, ncol=D)
+  vars <- matrix(uniform_var, nrow=E, ncol=D)
+  dim_names <- list(default_E_names(seq_len(E)), default_D_names(seq_len(D)))
+  dimnames(means) <- dim_names
+  dimnames(vars) <- dim_names
+
+  list(
+    means = means,
+    vars = vars
+  )
+}
+
 
 get_CDF_decoupler <- function(scale="linear", overshoot=0.1, k_percentiles=c(5,50,95), support_restriction=NULL) {
   return(
@@ -758,6 +1197,8 @@ get_CDF_decoupler <- function(scale="linear", overshoot=0.1, k_percentiles=c(5,5
       f_increasing=indep_CDF_increasing,
       fix_m = \(m) get_cdf_indep_function_fix_m(m, overshoot=overshoot, k_percentiles=k_percentiles, scale=scale, support_restriction=support_restriction),
       f_inverse=\(z, m) decouple_CDF_inverse(z, m, scale=scale),
+      D_tilde = 1,
+      ideal_mean_var = \(quantiles) uniform_mean_var(nrow(quantiles), 1), # always one dimensional output
       short_name="CDF"
     )
   )
@@ -826,8 +1267,23 @@ get_cdf_indep_function_fix_m <- function(m, overshoot=0.1, k_percentiles = c(5,5
 
 ###### Sigmoid functions to compose above error functions with
 
+sigmoid <- function(x, k) {
+  return(1 / (1 + exp(-k * x)))
+}
+
+sigmoid_prime <- function(x, k) {
+  exp_val = exp(-k * (x))
+  return(k * exp_val / ((1 + exp_val)^2))
+}
+
+sigmoid_inverse <- function(y, k) {
+  return(log(y / (1-y)) / k)
+}
+
 shifted_sigmoid <- function(x, L, x_0, k) {
   # if x is Inf or -Inf return L/2 and -L/2 respectively
+  stopifnot(L=1)
+  stopifnot(x_0=0)
   return(L / (1 + exp(-k * (x - x_0))) - L / 2)
 }
 
@@ -844,16 +1300,118 @@ sigmoid_centered_image_inverse_prime <- function(y, L, x_0, k) {
   return(4*L/(k*(L - 2*y)*(L+2*y)))
 }
 
+sigmoid_primitive <- function(x, k) {
+  #return(log1pexp(k * x))/k
+  return(log(1+exp(k * x)))/k
+}
+
+sigmoid_squared <- function(x, k) {
+  return(sigmoid(x,k)^2)
+}
+
+sigmoid_squared_primitive <- function(x, k) {
+  term1 <- 1/(k*(1+exp(k * x)))
+  #term2 <- log1pexp(k*x)/k # this seemed to give more hidden numerical issues.
+  term2 <- log(1+exp(k * x))/k
+  return(term1 + term2 - 1) # -1 makes it 0 at x=-Inf
+}
+
+sigmoid_composed_primitive <- function(affine_decoupler, k, q, m, primitive) {
+  # This corresponds to the inegral of $\phi(q, m)$ wrt q.
+
+  derivs <- affine_decoupler$f_prime_q(q, m) # constant wrt q but plugging it in to get the output dimensions
+  decoupler_vals <- affine_decoupler$f(q, m)
+  primitive(decoupler_vals, k=k) / derivs
+}
+
+sigmoid_composed_affine_decoupler_ideal_mean_var <- function(affine_decoupler, k, m, quantiles, cum_prob=c(0, 0.05, 0.5, 0.95, 1)) {
+  checkmate::assert_matrix(quantiles, ncols=length(cum_prob))
+  stopifnot(0 %in% cum_prob)
+  stopifnot(1 %in% cum_prob)
+  # diff works column wise but we want it over the rows
+  cum_prob_diff <- diff(cum_prob)
+
+  # loop per expert
+  means_and_vars <- purrr::array_branch(quantiles, margin=1) |> purrr::map2(seq_len(nrow(quantiles)), \(expert_quantiles, e) {
+    primitive_values_squared <- sigmoid_composed_primitive(affine_decoupler, k, expert_quantiles, m, sigmoid_squared_primitive)[,e,] # DxEx\tilde{D} to D after automatic drop (\tilde{D}=1)
+    primitive_values_diffs <- diff(primitive_values_squared)
+    primitive_values <-sigmoid_composed_primitive(affine_decoupler, k, expert_quantiles, m, sigmoid_primitive)[,e,] # DxEx\tilde{D} to D after automatic drop (\tilde{D}=1)
+    primitive_value_diffs <- diff(primitive_values)
+    expert_quantile_diffs <- diff(expert_quantiles)
+    expected_value <- sum(cum_prob_diff * primitive_value_diffs / expert_quantile_diffs)
+    expected_value_squared <- sum(cum_prob_diff * primitive_values_diffs / expert_quantile_diffs)
+    varaiance <- expected_value_squared - expected_value^2
+    list(
+      mean=expected_value,
+      var=varaiance
+    )
+  }) |> purrr::list_transpose()
+  mean_matrix <- matrix(means_and_vars$mean, nrow=nrow(quantiles), ncol=1, dimnames = list(rownames(quantiles), "D1"))
+  var_matrix <- matrix(means_and_vars$var, nrow=nrow(quantiles), ncol=1, dimnames = list(rownames(quantiles), "D1"))
+  list(
+    means=mean_matrix,
+    vars=var_matrix
+  )
+  # We are evaluating the primitive at the quantiles but also providing the quantiles for the decoupler function
+  #matrix(expected_values, nrow=nrow(quantiles), ncol=1, dimnames = list(rownames(quantiles), "mean"))
+}
+
 get_sigmoid_ratio_decoupler <- function(k=6e-2) {
   decoupler <- get_ratio_decoupler()
   L=1
   x_0 = 1
   compose_sigmoid_with_decoupler(decoupler,
-                             sigmoid=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
-                             sigmoid_prime=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
-                             sigmoid_inverse = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k)
+                             sigmoid_f=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
+                             sigmoid_prime_f=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
+                             sigmoid_inverse_f = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k)
   )
+}
 
+get_sigmoid_relative_decoupler <- function(k=1) {
+  decoupler <- get_relative_decoupler(D_tilde=1, )
+  L=1
+  x_0 = 0
+  decoupler_composed <- compose_sigmoid_with_decoupler(decoupler,
+                             sigmoid_f=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
+                             sigmoid_prime_f=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
+                             sigmoid_inverse_f = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k))
+
+
+
+  decoupler_composed
+}
+
+get_sigmoid_mean_ratio_decoupler <- function(k=6e-2, global_support=TRUE) {
+  decoupler <- get_mean_ratio_decoupler(global_support=global_support)
+  L=1
+  x_0 = 1
+  compose_sigmoid_with_decoupler(decoupler,
+                                 sigmoid_f=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
+                                 sigmoid_prime_f=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
+                                 sigmoid_inverse_f = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k)
+  )
+}
+
+get_sigmoid_support_ratio_decoupler <- function(k=1, global_support=TRUE, quantile_probs=c(0.05,0.5,0.95), overshoot=0.1, support_restriction=NULL) {
+  decoupler <- get_support_ratio_decoupler(global_support=global_support, quantile_probs=quantile_probs, overshoot=overshoot, support_restriction=support_restriction)
+  L=1
+  x_0=0
+
+  compose_sigmoid_with_decoupler(decoupler,
+                             sigmoid_f=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
+                             sigmoid_prime_f=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
+                             sigmoid_inverse_f = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k))
+}
+
+get_sigmoid_mean_linear_decoupler <- function(k=6e-2, global_support=TRUE) {
+  decoupler <- get_mean_linear_decoupler(global_support=global_support)
+  L=1
+  x_0 = 1
+  compose_sigmoid_with_decoupler(decoupler,
+                                 sigmoid_f=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
+                                 sigmoid_prime_f=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
+                                 sigmoid_inverse_f = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k)
+  )
 }
 
 get_sigmoid_linear_error_metric <- function(k=0.05) {
@@ -861,9 +1419,9 @@ get_sigmoid_linear_error_metric <- function(k=0.05) {
   L=2
   x_0 = 0
   compose_sigmoid_with_error(error_metric,
-                             sigmoid=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
-                             sigmoid_prime=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
-                             sigmoid_inverse = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k),
+                             sigmoid_f=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
+                             sigmoid_prime_f=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
+                             sigmoid_inverse_f = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k),
                              sigmoid_inverse_prime = purrr::partial(sigmoid_centered_image_inverse_prime, L=L, x_0=x_0, k=k)
   )
 
@@ -874,21 +1432,21 @@ get_sigmoid_relative_error_metric <- function(k=0.05) {
   L=2
   x_0 = 0
   compose_sigmoid_with_error(error_metric,
-                             sigmoid=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
-                             sigmoid_prime=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
-                             sigmoid_inverse = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k),
+                             sigmoid_f=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
+                             sigmoid_prime_f=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
+                             sigmoid_inverse_f = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k),
                              sigmoid_inverse_prime = purrr::partial(sigmoid_centered_image_inverse_prime, L=L, x_0=x_0, k=k)
   )
 }
 
 get_sigmoid_linear_decoupler <- function(k=0.05) {
-  decoupler <- get_linear_decoupler()
+  decoupler <- get_linear_decoupler(compose_sigmoid=FALSE)
   L=1
   x_0 = 0
   compose_sigmoid_with_decoupler(decoupler,
-                             sigmoid=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
-                             sigmoid_prime=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
-                             sigmoid_inverse = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k)
+                             sigmoid_f=purrr::partial(shifted_sigmoid, L=L, x_0=x_0, k=k),
+                             sigmoid_prime_f=purrr::partial(shifted_sigmoid_prime, L=L, x_0=x_0, k=k),
+                             sigmoid_inverse_f = purrr::partial(shifted_sigmoid_inverse, L=L, x_0=x_0, k=k)
                              )
 }
 
@@ -903,30 +1461,30 @@ get_sigmoid_linear_decoupler <- function(k=0.05) {
 #' @export
 #'
 #' @examples
-compose_sigmoid_with_decoupler <- function(decoupler, sigmoid, sigmoid_prime, sigmoid_inverse) {
+compose_sigmoid_with_decoupler <- function(decoupler, sigmoid_f, sigmoid_prime_f, sigmoid_inverse_f) {
   checkmate::assert_class(decoupler, "decoupler")
 
   f <- \(q,m) {
-    sigmoid(decoupler$f(q, m))
+    sigmoid_f(decoupler$f(q, m))
   }
 
   f_inverse <- if (is.null(decoupler$f_inverse))  NULL else \(z,m) {
-    decoupler$f_inverse(sigmoid_inverse(z), m)
+    decoupler$f_inverse(sigmoid_inverse_f(z), m)
   }
 
   f_prime_q <- \(q,m) {
-    sigmoid_prime(decoupler$f(q, m)) * decoupler$f_prime_q(q, m)
+    sigmoid_prime_f(decoupler$f(q, m)) * decoupler$f_prime_q(q, m)
   }
 
   fix_m <- \(m) {
     fixed_decoupler <- decoupler$fix_m(m)
     new_fixed_decoupler(
       name=glue::glue("{decoupler$name} with sigmoid"),
-      f = \(q) sigmoid(fixed_decoupler$f(q)),
-      f_prime_q= \(q) sigmoid_prime(fixed_decoupler$f(q)) * fixed_decoupler$f_prime_q(q),
+      f = \(q) sigmoid_f(fixed_decoupler$f(q)),
+      f_prime_q= \(q) sigmoid_prime_f(fixed_decoupler$f(q)) * fixed_decoupler$f_prime_q(q),
       f_increasing=fixed_decoupler$f_increasing,
       D=fixed_decoupler$D,
-      f_inverse= if (is.null(fixed_decoupler$f_inverse)) NULL else \(z) fixed_decoupler$f_inverse(sigmoid_inverse(z))
+      f_inverse= if (is.null(fixed_decoupler$f_inverse)) NULL else \(z) fixed_decoupler$f_inverse(sigmoid_inverse_f(z))
     )
   }
 
@@ -934,9 +1492,10 @@ compose_sigmoid_with_decoupler <- function(decoupler, sigmoid, sigmoid_prime, si
                    f=f,
                    f_prime_q = f_prime_q,
                    f_increasing = decoupler$f_increasing,
-                    fix_m =fix_m,
+                   fix_m =fix_m,
                    f_inverse=f_inverse,
-                short_name = glue::glue("s({decoupler$short_name})")
+                short_name = glue::glue("s({decoupler$short_name})"),
+                D_tilde = decoupler$D_tilde,
                    )
 
 }

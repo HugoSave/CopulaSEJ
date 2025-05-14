@@ -28,9 +28,9 @@ combine_lists_of_functions_to_function <- function(densities_list) {
 }
 
 change_small_value_in_study_list <- function(study_list,
-                                               col_name,
-                                               min_value
-                                               ){
+                                             col_name,
+                                             min_value
+){
   study_modified <- vector("integer")
 
   for (i in seq_along(study_list)) {

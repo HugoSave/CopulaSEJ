@@ -104,9 +104,9 @@ res <- fit_and_construct_posterior(
         error_estimation_settings = list(out_of_boundary="clamp"),
         q_not_cross_zero = FALSE
       )
-#plot_distributions(res$error_margins[], "pdf") 
+#plot_distributions(res$decoupler_margins[], "pdf") 
 # estimate_margins(res$flattened_errors)[1] |> plot_distributions("pdf") 
-# #res$error_margins
+# #res$decoupler_margins
 # estimate_margin_beta(res$flattened_errors[,1]) |> list() |> plot_distributions()
 
 corr_df <- correlation_df_from_flat_errors(res$flattened_errors)
@@ -118,12 +118,12 @@ corr_df |> ggplot(aes(x=variable1, y=variable2, fill=correlation)) + geom_tile()
 ```
 
 ```{r}
-res$error_margins |> purrr::keep(\(x) x$d==2)  |> 
+res$decoupler_margins |> purrr::keep(\(x) x$d==2)  |> 
   plot_distributions("pdf")
 ```
 
 ```{r}
-q_marginals <- calculate_marginal_posteriors(res$error_margins, test_m_matrix, error_metric)
+q_marginals <- calculate_marginal_posteriors(res$decoupler_margins, test_m_matrix, error_metric)
 # normalize posterior 
 q_marginals[] |>  purrr::keep(\(x) x$d==2) |>
   plot_distributions("pdf")

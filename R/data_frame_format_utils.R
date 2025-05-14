@@ -120,11 +120,12 @@ study_df_to_summary_array <- function(training_set, m_fun, k_percentiles=c(5,50,
   if (is.null(colnames(assessments))) {
     colnames(assessments) <-  k_percentiles %>% paste0("M", .)
   }
-  m <- m_fun(assessments) # dim = (n*E, d)
+  #m <- m_fun(assessments) # this does not respect that some m_fun are meant to operate on a per question level.
 
-  m_3d <- m |> split.data.frame(ordered_training$question_id) |>
-    abind::abind(along = 3) |> # dim = (E, d, n)
-    aperm(c(3, 1, 2)) # dim = (n, E, d)
+  m_3d <- assessments |> split.data.frame(ordered_training$question_id) |> # split into ExD matrices
+    purrr::map(m_fun) |> # convert to Ex\tilde{D}
+    abind::abind(along = 3) |> # dim = (E, \tilde{D}, n)
+    aperm(c(3, 1, 2)) # dim = (n, E, \tilde{D})
 
   dimnames_1 <- ordered_training$question_id |> unique()  %>% paste0("Q", .)
   dimnames_2 <- ordered_training$expert_id |> unique() %>% paste0("E", .)

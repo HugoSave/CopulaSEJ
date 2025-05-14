@@ -78,13 +78,13 @@ res <- fit_and_construct_posterior_indep(
         q_support_restriction = NULL
       )
 
-error_margins <- res$error_margins |> 
+decoupler_margins <- res$decoupler_margins |> 
    purrr::map(\(x) {
   #x$d = switch(x$d, "1" = "M5", "2" = "M50", "3" = "M95"); 
   x$expert_id = paste0("E", x$expert_id);
   x })
 
-res$errors |> plot_3d_errors()  |> plot_add_supports(error_margins)
+res$errors |> plot_3d_errors()  |> plot_add_supports(decoupler_margins)
 
 ```
 ```{r}
@@ -96,18 +96,18 @@ plot(fit)
 ```
 
 ```{r}
-error_margins[6] |> plot_distributions("pdf")
+decoupler_margins[6] |> plot_distributions("pdf")
 ```
 
 ```{r}
-margin <- error_margins[[6]]
+margin <- decoupler_margins[[6]]
 x <- seq(margin$support[1], margin$support[2], length.out = 1000)
 y <- margin$pdf(x)
 integrate(margin$pdf, margin$support[1], margin$support[2], subdivisions = 10000)
 ```
 
 ```{r}
-error_margins[[6]]$pdf(0.4)
+decoupler_margins[[6]]$pdf(0.4)
 ```
 ```{r}
 test_set_ext <- add_0_and_100_percentiles(test_set, k_percentiles)
@@ -170,11 +170,11 @@ res <- fit_and_construct_posterior(
 print(glue::glue("Desired support: {paste0(res$posterior$support, collapse=',')}"))
 
 expert_id <- 3
-error_margins <- res$error_margins |> purrr::map(\(x) {
+decoupler_margins <- res$decoupler_margins |> purrr::map(\(x) {
   x$d = switch(x$d, "1" = "M5", "2" = "M50", "3" = "M95"); 
   x$expert_id = paste0("E", x$expert_id);
   x })
-exp_error_margins <- error_margins |> purrr::keep(\(x) x$expert_id == paste0("E", expert_id))
+exp_error_margins <- decoupler_margins |> purrr::keep(\(x) x$expert_id == paste0("E", expert_id))
   
 exp_error_margins |> plot_supports()
 ```
@@ -186,10 +186,10 @@ test_m_matrix[,2] |> median()
 ```
 
 ```{r}
-error_margins |> plot_supports()
+decoupler_margins |> plot_supports()
 ```
 ```{r}
-error_margins |> plot_supports() + xlim(0, 10000)
+decoupler_margins |> plot_supports() + xlim(0, 10000)
 ```
 ```{r}
 res$errors[,,, drop=FALSE] |> plot_3d_errors()
@@ -200,7 +200,7 @@ res$errors[,expert_id,3, drop=FALSE] |> plot_3d_errors()
 
 ```{r}
 # 
-error_margins_exp <- res$error_margins |> purrr::keep(\(x) x$expert_id == expert_id && x$d==3) 
+error_margins_exp <- res$decoupler_margins |> purrr::keep(\(x) x$expert_id == expert_id && x$d==3) 
 error_margins_exp |> plot_distributions("pdf", overshoot = 0)
 ```
 And zoomed in between 0 and 100:
@@ -218,7 +218,7 @@ print(glue::glue("pdf(1000) = {error_margins_exp[[1]]$pdf(1000)}\n
 ```
 
 ```{r}
-q_marginals <- calculate_marginal_posteriors(res$error_margins, test_m_matrix, ratio_metric)
+q_marginals <- calculate_marginal_posteriors(res$decoupler_margins, test_m_matrix, ratio_metric)
 q_marginals_f <- combine_lists_of_functions_to_function(q_marginals)
 exp_q_margins <- q_marginals  |> purrr::keep(\(x) x$expert_id == expert_id)
 exp_q_margins[3] |> plot_distributions("pdf")
@@ -294,11 +294,11 @@ plot(x,exp(y))
 
 ```{r}
 expert_id <- 7
-error_margins <- res$error_margins |> purrr::map(\(x) {
+decoupler_margins <- res$decoupler_margins |> purrr::map(\(x) {
   x$d = switch(x$d, "1" = "M5", "2" = "M50", "3" = "M95"); 
   x$expert_id = paste0("E", x$expert_id);
   x })
-exp_error_margins <- error_margins |> purrr::keep(\(x) x$expert_id == paste0("E", expert_id))
+exp_error_margins <- decoupler_margins |> purrr::keep(\(x) x$expert_id == paste0("E", expert_id))
   
 exp_error_margins |> plot_supports()
 ```

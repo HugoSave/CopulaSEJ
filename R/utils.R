@@ -80,9 +80,8 @@ assessment_array_to_flattened_errors <- function(assessments, realizations, erro
     flatten_matrix_row_by_row(error_values)
   }) |> do.call(what = rbind) # Nx(d*E) matrix
 
-  col_names <- purrr::map(1:E, \(i) paste0("E", i, "D", 1:D)) |> unlist()
   row_names <- paste0("Q", 1:N)
-  colnames(flattened_erros) <- flattened_d_e_names(E, D)
+  colnames(flattened_erros) <- flattened_E_D_names(E, D)
   rownames(flattened_erros) <- row_names
   flattened_erros
 }
@@ -95,8 +94,12 @@ default_E_names <- function(E_indices) {
   paste0("E", E_indices)
 }
 
-flattened_d_e_names <- function(E, D) {
+flattened_E_D_names <- function(E, D) {
   purrr::map(1:E, \(i) paste0("E", i, "D", 1:D)) |> unlist()
+}
+
+default_D_names <- function(D_indices) {
+  paste0("D", D_indices)
 }
 
 

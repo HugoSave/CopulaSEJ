@@ -11,18 +11,20 @@
 #' @param min_nr_experts minimum number of experts to accept. If the number of
 #' accepted experts is less than this value, the best experts are selected based on p-values.
 #'
-#' @returns
+#' @returns A list with the following elements:
+#' - accepted_estimates: a Qx\tilde{E}xD array with the accepted estimates
+#' - p_values: a vector with the p-values for each expert
 #' @export
 #'
 #' @examples
-reject_experts <- function(training_estimates, training_realizations,
+reject_experts <- function(training_assessments, training_realizations,
                            rejection_level=0.1, test="kruskal", decoupler=NULL, min_nr_experts=NULL) {
-  checkmate::assert_array(training_estimates, "numeric", d=3)
+  checkmate::assert_array(training_assessments, "numeric", d=3)
   checkmate::assert_numeric(training_realizations)
   checkmate::assert_subset(test, c("kruskal", "classical_calibration", "distance_correlation"))
   checkmate::assert_number(rejection_level, lower=0, upper=1)
   checkmate::assert_count(min_nr_experts, positive=TRUE, null.ok=TRUE)
-  p_vals <- p_values_test(training_estimates, training_realizations, test, decoupler)
+  p_vals <- p_values_test(training_assessments, training_realizations, test, decoupler)
 
   if (!is.null(min_nr_experts)) {
     accepted_experts <- adaptive_p_value_rejection(p_vals, rejection_level, min_nr_experts)
@@ -30,13 +32,13 @@ reject_experts <- function(training_estimates, training_realizations,
     accepted_experts <- which(p_vals > rejection_level)
   }
 
-  accepted_estimates <- training_estimates[,accepted_experts, ,drop=FALSE]
+  accepted_assessments <- training_assessments[,accepted_experts, ,drop=FALSE]
 
   return(list(
-    accepted_estimates=accepted_estimates,
+    accepted_assessments=accepted_assessments,
     p_values=p_vals,
     accepted_experts=accepted_experts,
-    rejected_experts=setdiff(1:dim(training_estimates)[2], accepted_experts)
+    rejected_experts=setdiff(1:dim(training_assessments)[2], accepted_experts)
   ))
 }
 

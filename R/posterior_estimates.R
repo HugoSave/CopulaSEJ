@@ -36,7 +36,7 @@ posterior_performance_metrics <- function(log_unnormalized_posterior, support, t
   # )
 
   neg_log_like <- -log(likelihood)
-  return(performance_metrics_list(mean=mean_value, median=median_value, neg_log_lik=neg_log_like, post_neg_log_lik=post_neg_log_lik, sd=sd_value))
+  return(performance_metrics_list( mean=mean_value, median=median_value, neg_log_lik=neg_log_like, post_neg_log_lik=post_neg_log_lik, sd=sd_value))
 }
 
 

@@ -9,7 +9,7 @@ test_that("reject_experts returns valid structure for classical_calibration", {
                            rejection_level = 0.2, test = "classical_calibration")
 
   expect_type(result, "list")
-  expect_named(result, c("accepted_estimates", "p_values", "accepted_experts", "rejected_experts"))
+  expect_named(result, c("accepted_assessments", "p_values", "accepted_experts", "rejected_experts"))
   expect_true(is.numeric(result$p_values))
   expect_true(is.numeric(result$accepted_experts))
 })

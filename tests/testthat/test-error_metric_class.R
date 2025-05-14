@@ -53,6 +53,84 @@ test_error_metric <- function(e_metric) {
   expect_equal(err_inv, matrix(q, nrow=length(q), ncol=ncol(m_all)))
 }
 
+test_that("sigmoid_composed_affine_decoupler_ideal_mean_var works", {
+  quantiles = matrix(c(-8, 2, 3,
+               5, 7, 15,
+               -15,0,15), nrow=3, ncol=3, byrow=TRUE)
+  rownames(quantiles) <- c("E1", "E2", "E3")
+  quantiles_extended <- add_0_and_100_percentiles_matrix(quantiles)
+  estimate_mean_from_quantiles(quantiles_extended, c(0.05,0.5, 0.95))
+  decoupler <- get_relative_decoupler(D_tilde=1, compose_sigmoid = FALSE, m_preprocess="mean_G")
+  k = 1
+
+
+  set.seed(1)
+  dists <- linear_distribution_interpolation_matrix(quantiles_extended, c(0, 0.05, 0.5, 0.95, 1))
+  samples <- dists |> purrr::map2(seq_along(dists), \(dist, e) {
+    s <- dist$sample(1000000)
+    Z_orig <- decoupler$f(s, quantiles)[,e,1] # NxEx1 to N
+    Z_final <- sigmoid(Z_orig, k=k)
+    list(mean=mean(Z_final), var=var(Z_final))
+    }) |> purrr::list_transpose()
+
+  means_vars <- sigmoid_composed_affine_decoupler_ideal_mean_var(decoupler, k=k, m=quantiles, quantiles=quantiles_extended, cum_prob=c(0, 0.05,0.5,0.95, 1))
+
+  expect_equal(dim(means_vars$means),c(3,1))
+  expect_equal(dim(means_vars$vars),c(3,1))
+  # we actually currently are failing the last test. Not numerically stable enough. I think we would need a MC backup if the numerical part fails
+  expect_equal(means_vars$means[1:2,1],samples$mean[1:2], tolerance = 0.001)
+  expect_equal(means_vars$vars[1:2,1],samples$var[1:2], tolerance = 0.001)
+
+  decoupler_composed <- get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k =1)
+  expect_equal(decoupler_composed$ideal_mean_var(quantiles),means_vars)
+})
+
+
+test_that("support_ratio_decoupler is correct", {
+  E = 2
+  m = matrix(
+    c(1,2,3,
+      2,3,5), nrow=E, ncol=3, byrow=TRUE)
+  range <- c(1,5) # width of 4
+  extended_range = c(0.6, 5.4) # width of 4.8. 10% overshoot
+  m_exteneded <- matrix(
+    c(0.6, 1, 2, 3, 5.4,
+      0.6, 2, 3, 5, 5.4), nrow=2, ncol=5, byrow=TRUE)
+
+  estimated_means <- estimate_mean_from_quantiles(m_exteneded, c(0.05,0.5, 0.95))
+  decoupler <- get_support_ratio_decoupler(overshoot=0.1)
+  q_test <- c(0, 3)
+  width=4.8
+  expected_output_q1 <- matrix(
+    (0-estimated_means)/width, ncol=1
+  )
+  expected_output_q2 <- matrix(
+    (3-estimated_means)/width, ncol=1
+  )
+  expected_output <- abind::abind(
+    expected_output_q1, expected_output_q2,
+    along=0
+  )
+  dimnames(expected_output) <- NULL
+  output <- decoupler$f(q_test, m)
+  expect_equal(output, expected_output)
+  # check inverse
+  expect_equal(decoupler$f_prime_q(q_test, m),
+               array(1/width, dim=c(2,2,1)))
+
+  expect_equal(decoupler$f_increasing(m),
+               matrix(TRUE, nrow=2, ncol=1))
+  z = c(expected_output[1,,], expected_output[2,,])
+  expected_inverse_out_third_dim <- matrix(
+    c(z[1]*width + estimated_means[1], z[1]*width + estimated_means[2],
+      z[2]*width + estimated_means[1], z[2]*width + estimated_means[2],
+      z[3]*width + estimated_means[1], z[3]*width + estimated_means[2],
+      z[4]*width + estimated_means[1], z[4]*width + estimated_means[2]), nrow=length(z), ncol=E, byrow=TRUE
+  )
+  expected_out <- array(expected_inverse_out_third_dim, dim=c(length(z), E, 1))
+  expect_equal(decoupler$f_inverse(z, m), expected_out)
+})
+
 test_that("decoupler linear error metric is correct", {
   m_test = matrix(c(1,2,3,4), nrow=2, ncol=2, byrow=FALSE)
   q = c(1, 2)

@@ -71,20 +71,20 @@ calculate_adjacency_matrix <- function(error_matrix, method="kendall", threshold
   adjacency_matrix
 }
 
-partition_errors_disjoint <- function(error_matrix, method="kendall", threshold=0.7) {
-  stopifnot(length(dim(error_matrix)) == 2)
+partition_errors_disjoint <- function(cdf_matrix, method="kendall", threshold=0.7) {
+  stopifnot(length(dim(cdf_matrix)) == 2)
   # we want to find groups of errors that are disjoint
   # determine the correlation between experts
-  adjacency_matrix <- calculate_adjacency_matrix(error_matrix, method=method, threshold=threshold)
+  adjacency_matrix <- calculate_adjacency_matrix(cdf_matrix, method=method, threshold=threshold)
   graph <- igraph::graph_from_adjacency_matrix(adjacency_matrix, mode = "undirected", diag = FALSE)
   igraph::components(graph)
 }
 
-partition_and_fit_copulas <- function(error_matrix, copula_model, threshold, fit_settings) {
-  partionings <- partition_errors_disjoint(error_matrix, threshold)
+partition_and_fit_copulas <- function(cdf_matrix, copula_model, threshold, fit_settings) {
+  partionings <- partition_errors_disjoint(cdf_matrix, threshold)
   groups <- igraph::groups(partionings)
   copulas <- igraph::groups(partionings) |> purrr::map(\(group) {
-    group_obs <- error_matrix[,group,drop=FALSE]
+    group_obs <- cdf_matrix[,group,drop=FALSE]
     rlang::inject(fit_copula(group_obs, copula_model, !!!fit_settings))
   })
 
@@ -151,36 +151,37 @@ wrap_copula <- function(copula) {
   }
 }
 
-# error_obs is nx(d*E) matrix (n questions, d * E errors)
-fit_copula <- function(error_obs, copula_model = "joe",
+# pseudo_obse rror_obs is nx(d*E) matrix (n questions, d * E errors)
+fit_copula <- function(pseudo_obs, copula_model = "joe",
                        family_set = c("gaussian","indep"),
                        selcrit="mbicv", psi0=0.5,
                        copula_fit_method="itau",
                        threshold=0.5) {
-  if (ncol(error_obs) == 1) {
+  if (ncol(pseudo_obs) == 1) {
     indep1DCopula = copula::indepCopula(dim=1)
 
     return(wrap_copula(indep1DCopula))
   }
+  if (copula_model == "indep") {
+    return(wrap_copula(copula::indepCopula(dim = ncol(pseudo_obs))))
+  }
 
-  res <- checkmate::check_number(nrow(error_obs), lower=10)
+  res <- checkmate::check_number(nrow(pseudo_obs), lower=10)
   if (is.character(res)) {
-    checkmate::makeAssertion(error_obs, "Number of training samples must be at least 10. This comes from a hard coded limit in the rvinecopula (and vineCopula) package when fitting a copula.",
-                             "nrow(error_obs)",
+    checkmate::makeAssertion(pseudo_obs, "Number of training samples must be at least 10. This comes from a hard coded limit in the rvinecopula (and vineCopula) package when fitting a copula.",
+                             "nrow(pseudo_obs)",
                              NULL)
   }
-  error_length = ncol(error_obs)
+  error_length = ncol(pseudo_obs)
   lower = NULL
   upper = NULL
-  pseudo_obs <- rvinecopulib::pseudo_obs(error_obs)
+  #pseudo_obs <- rvinecopulib::pseudo_obs(error_obs)
 
   # fit a copula to the data
   if (copula_model == "joe") {
     copula_model <- copula::joeCopula(dim = error_length)
     lower = 1
     upper = 18.7 # 18.7 Corresponds to an Kendall tau of 0.9. For numerical reasons we limit it to this.
-  } else if (copula_model == "indep") {
-    return(wrap_copula(copula::indepCopula(dim = error_length)))
   } else if (copula_model == "frank") {
     copula_model <- copula::frankCopula(dim = error_length)
     lower = 0
@@ -307,6 +308,16 @@ add_0_and_100_percentiles_matrix <- function(quantiles, overshoot=0.1, support_r
   support <- widen_support(support, overshoot=overshoot, support_restriction = support_restriction)
   # add the 0th and 100th percentiles
   cbind(support[1], quantiles, support[2])
+}
+
+add_0_and_100_percentiles_matrix_per_row <- function(quantiles, overshoot=0.1, support_restriction=NULL) {
+  checkmate::assert_matrix(quantiles, "numeric")
+  checkmate::assert_number(overshoot, lower=0)
+  checkmate::assert_string(support_restriction, null.ok=TRUE)
+  supports <- widen_supports(quantiles[,c(1, ncol(quantiles))], overshoot=overshoot, support_restriction = support_restriction)
+  # add the 0th and 100th percentiles
+  quantiles <- cbind(supports[,1], quantiles, supports[,2])
+  quantiles
 }
 
 
@@ -455,25 +466,57 @@ load_stan_model_beta_hiarch <- function() {
   stan_model
 }
 
-estimate_margin_beta_hiarch <- function(obs_vec, support, alpha_a=10, beta_a=alpha_a, alpha_b=alpha_a, beta_b=alpha_a) {
+mean_variance_to_beta_params <- function(mean, variance, min_value=1e-6) {
+  stopifnot(variance < 0.25) # variance must be less than 0.25 to be a beta distribution
+  # mean = alpha / (alpha + beta)
+  # variance = alpha * beta / ((alpha + beta)^2 * (alpha + beta + 1))
+  # solve for alpha and beta
+  alpha <- mean * (mean * (1 - mean) / variance - 1)
+  beta <- (1 - mean) * (mean * (1 - mean) / variance - 1)
+  alpha <- pmax(alpha, min_value)
+  beta <- pmax(beta, min_value)
+  c(alpha, beta) # shape, rate
+}
+
+mean_variance_to_gamma_params <- function(mean, variance) {
+  # mean = alpha / beta
+  # variance = alpha / (beta^2)
+  # solve for alpha and beta
+  beta <- mean^2 / variance
+  alpha <- mean * beta
+  c(alpha, beta) # shape, rate
+}
+
+estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_var=1/12, prior_var=0.1, clamp_epsilon=0.001, out_of_boundary="clamp") {
+  beta_param_centers <- mean_variance_to_beta_params(beta_mean, beta_var) #
+  A_prior_params <- mean_variance_to_gamma_params(beta_param_centers[1], prior_var)
+  B_prior_params <- mean_variance_to_gamma_params(beta_param_centers[2], prior_var)
+
   support_width <- support[2] - support[1]
-  stopifnot(support_width == 1)
-  zero_to_one_obs <- obs_vec - support[1]
+  # if (support_width != 1) {
+  #   stop(glue::glue("Support width must be 1. Not {support_width}."))
+  # }
+  if (out_of_boundary=="clamp") {
+    boundry_offset <- support_width * clamp_epsilon
+    inside_support <- c(support[1] + boundry_offset, support[2] - boundry_offset)
+    obs_vec <- pmin(pmax(obs_vec, inside_support[1]), inside_support[2])
+  }
+  zero_to_one_obs <- (obs_vec - support[1])/support_width
 
   model <- load_stan_model()
   N = length(obs_vec)
   data_list <- list(
     N = N,
     Z = zero_to_one_obs,
-    alpha_a = alpha_a,
-    beta_a = beta_a,
-    alpha_b = alpha_b,
-    beta_b = beta_b
+    alpha_a = A_prior_params[1],
+    beta_a = A_prior_params[2],
+    alpha_b = B_prior_params[1],
+    beta_b = B_prior_params[2]
   )
 
   fit_map <- rstan::optimizing(
-    mod,
-    data = data_list
+    model,
+    data = data_list # , check_data = FALSE - not sure if I should have this or not.
   )
   fit_map
 
@@ -555,8 +598,7 @@ estimate_margin_beta <- function(obs_vec, support=NULL, overshoot=0.1, out_of_bo
     extraDistr::pnsbeta(e_vec, shape1, shape2, min=support[1], max=support[2])
   }
 
-
-  list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(shape_1, shape_2))
+  list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(shape1, shape2))
 }
 
 beta_approx_middel <- function(shape1, shape2) {
@@ -625,11 +667,20 @@ estimate_margin_kde <- function(obs, support, bw="SJ", package="stats") {
 #' @export
 #'
 #' @examples
-estimate_margins <- function(observations, supports=NULL, method="beta", overshoot=0.1, out_of_boundary="clamp", bw="SJ") {
+estimate_margins <- function(observations, supports=NULL, method="beta", overshoot=0.1, out_of_boundary="clamp", bw="SJ", beta_mean=0.5, beta_var=1/12, prior_var=0.1) {
   checkmate::assert_matrix(observations, "numeric")
+  nr_dims = ncol(observations)
   checkmate::assert(
     checkmate::check_list(supports, null.ok=TRUE, len = ncol(observations), any.missing = FALSE, types = c("numeric")),
     checkmate::check_numeric(supports, len = 2, any.missing = FALSE, finite=TRUE),
+  )
+  checkmate::assert(
+    checkmate::check_numeric(beta_mean, len = nr_dims, lower=0, upper=1),
+    checkmate::check_number(beta_mean, lower=0, upper=1)
+  )
+  checkmate::assert(
+    checkmate::check_numeric(beta_var, len = nr_dims, lower=0, upper=0.25), # variance of beta distributions are always less than 0.25
+    checkmate::check_number(beta_var, lower=0, upper=0.25)
   )
   if (is.numeric(supports)) { # if a single support, replicate it for all columns
     supports <- rep(list(supports), ncol(observations))
@@ -637,6 +688,12 @@ estimate_margins <- function(observations, supports=NULL, method="beta", oversho
   else if (is.null(supports)) {
     # if null then fill with NULL
     supports <- rep(NULL, ncol(observations))
+  }
+  if (length(beta_mean) == 1) {
+    beta_mean <- rep(beta_mean, nr_dims)
+  }
+  if (length(beta_var) == 1) {
+    beta_var <- rep(beta_var, nr_dims)
   }
 
   margins <- purrr::map(seq_len(ncol(observations)), function(i) {
@@ -646,7 +703,7 @@ estimate_margins <- function(observations, supports=NULL, method="beta", oversho
     } else if (method =="kde") {
       return(estimate_margin_kde(obs, supports[[i]], bw=bw))
     } else if (method == "beta_hierarchical") {
-      return(estimate_margin_beta_hiarch(obs, supports[[i]]))
+      return(estimate_margin_beta_hiarch(obs, supports[[i]], beta_mean=beta_mean[i], beta_var=beta_var[i], prior_var=prior_var))
     }
     else {
       stop(glue::glue("Unknown method: {method}"))
@@ -692,11 +749,38 @@ target_q_support_to_error_supports <- function(target_q_support, m_test_matrix, 
       }) |> purrr::list_flatten()
 }
 
-target_q_support_to_independence_supports <- function(target_q_support, m_test_matrix, indep_metric) {
-  i_values <- indep_metric$f(target_q_support, m_test_matrix) # 2xExD array
-  purrr::array_branch(i_values, c(2,3)) |> purrr::map(\(i_values) {
-    c(min(i_values), max(i_values))
+target_q_support_to_independence_supports <- function(target_q_support, m_test_matrix, decoupler) {
+  decoup_values <- decoupler$f(target_q_support, m_test_matrix) # 2xExD array
+  purrr::array_branch(decoup_values, c(2,3)) |> purrr::map(\(decoup_values) {
+    c(min(decoup_values), max(decoup_values))
   })
+}
+
+widen_supports <- function(supports_matrix, overshoot, support_restriction=NULL) {
+  # Expand the support by overshoot percent
+  checkmate::assert_subset(support_restriction, c("non_negative", "strict_positive", NULL))
+  checkmate::assert_matrix(supports_matrix, "numeric", ncols=2)
+  checkmate::assert_numeric(overshoot, lower=0)
+  support_widths <- supports_matrix[,2] - supports_matrix[,1]
+  new_left <- supports_matrix[,1] - overshoot * support_widths
+  new_right <- supports_matrix[,2] + overshoot * support_widths
+  if (is.null(support_restriction)) {
+    return(cbind(new_left, new_right))
+  }
+  if (support_restriction == "strict_positive") {
+    if (any(supports_matrix[,1] <= 0)) {
+      stop("All supports are not strictly positive. Cannot widen support with 'strict_positive' restriction.")
+    }
+    which_non_positive <- which(new_left <= 0)
+    new_left[which_non_positive] <- new_left[which_non_positive] * (1-overshoot)
+  } else if (support_restriction == "non_negative") {
+    if (any(supports_matrix[,1] < 0)) {
+      stop("All support are not non negative. Cannot widen support with 'non_negative' restriction.")
+    }
+    which_non_positive <- which(new_left < 0)
+    new_left[which_non_positive] <- 0
+  }
+  cbind(new_left, new_right)
 }
 
 widen_support <- function(support, overshoot, support_restriction=NULL) {
@@ -725,6 +809,13 @@ widen_support <- function(support, overshoot, support_restriction=NULL) {
     }
   }
   new_support
+}
+
+ideal_means_vars_non_finite_to_uniform <- function(means_vars) {
+  # if the means and vars are not finite, set them to uniform
+  means_vars$means[!is.finite(means_vars$means)] <- 0.5
+  means_vars$vars[!is.finite(means_vars$vars)] <- 1/12
+  means_vars
 }
 
 #' Title
@@ -780,7 +871,7 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
   training_dim <- dim(training_estimates)
   checkmate::assert_set_equal(training_dim, c(length(training_realizations), E, D), ordered=TRUE)
   res <- checkmate::check_number(training_dim[1], lower=10)
-  if (is.character(res)) {
+  if (is.character(res) && copula_model != "indep") {
     stop("Number of training samples ('dim(training_estimates)[1]') must be at least 10. This comes from a hard coded limit in the rvinecopula (and vineCopula) package.")
   }
 
@@ -790,7 +881,7 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
     if (length(rejection_results$accepted_experts) == 0) {
       stop("No experts accepted. Please check the rejection threshold or set rejection_min_experts > 0.")
     }
-    training_estimates <- rejection_results$accepted_estimates
+    training_estimates <- rejection_results$accepted_assessments
     test_matrix <- test_matrix[rejection_results$accepted_experts,, drop=FALSE]
   }
 
@@ -809,15 +900,24 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
 
   decoupler_support <- target_q_support_to_independence_supports(widend_support, test_matrix, decoupler)
 
+  if (is.function(decoupler$ideal_mean_var)) {
+    ideal_vars <- decoupler$ideal_mean_var(test_matrix) |> ideal_means_vars_non_finite_to_uniform()
+    ideal_means <- ideal_vars$means |> flatten_matrix_row_by_row()
+    ideal_vars <- ideal_vars$vars |> flatten_matrix_row_by_row()
+    error_estimation_settings$beta_mean <- ideal_means
+    error_estimation_settings$beta_var <- ideal_vars
+  }
   # inject here allows us to pass the arg=value pairs of the list as arguments
   margin_distributions <- rlang::inject(estimate_margins(decouple_flattened, decoupler_support, !!!error_estimation_settings))
   D_tilde = dim(decouple_values)[3]
   margin_distributions <- add_d_e_to_list(margin_distributions, D_tilde)
+  # convert the decoupled values to cdf values using the estimated margins
+  cdf_values <- purrr::imap(margin_distributions, \(margin, i) margin$cdf(decouple_flattened[,i])) |> do.call(what=cbind)
 
   if (is.null(connection_threshold)){
-    decoupler_copula <- rlang::inject(fit_copula(decouple_flattened, copula_model, !!!vine_fit_settings))
+    decoupler_copula <- rlang::inject(fit_copula(cdf_values, copula_model, !!!vine_fit_settings))
   } else {
-    decoupler_copula <- partition_and_fit_copulas(decouple_flattened, copula_model, connection_threshold, vine_fit_settings)
+    decoupler_copula <- partition_and_fit_copulas(cdf_values, copula_model, connection_threshold, vine_fit_settings)
   }
 
   posterior<-create_log_unnormalized_posterior_indep(decoupler_copula,
@@ -831,7 +931,7 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
     flattened_errors=decouple_flattened,
     errors=decouple_values,
     decoupler_copula=decoupler_copula,
-    error_margins=margin_distributions
+    decoupler_margins=margin_distributions
   )
   if (exists("rejection_results")) {
     ret$accepted_experts <- rejection_results$accepted_experts
@@ -931,7 +1031,9 @@ fit_and_construct_posterior <- function(training_estimates, training_realization
   margin_distributions <- rlang::inject(estimate_margins(flattened_errors, target_error_supports, !!!error_estimation_settings))
   margin_distributions <- add_d_e_to_list(margin_distributions, D)
 
-  error_copula <- rlang::inject(fit_copula(flattened_errors, copula_model, !!!vine_fit_settings))
+
+  cdf_values <- purrr::imap(margin_distributions, \(margin, i) margin$cdf(flattened_errors[,i])) |> do.call(what=cbind)
+  error_copula <- rlang::inject(fit_copula(cdf_values, copula_model, !!!vine_fit_settings))
 
   posterior<-create_log_unnormalized_posterior(error_copula,
                                     margin_distributions,
@@ -1022,12 +1124,15 @@ copula_fit_and_predict_JC_assumption <- function(training_set,
                                                             error_metric,
                                                             summarizing_function$f,
                                                             k_percentiles)
-  error_copula <- fit_copula(flattened_errors, copula_model)
 
   m_realizations_test <- summarizing_function$f(test_set[k_percentiles_to_colname(k_percentiles)])
   test_set <- add_0_and_100_percentiles(test_set, k_percentiles)
   distributions <- interpolate_distributions(test_set, interpolation = interpolation)
 
+  cdf_values <- purrr::imap(distributions, \(margin, i) margin$cdf(flattened_errors[,i])) |> do.call(what=cbind)
+
+
+  error_copula <- fit_copula(cdf_values, copula_model)
   unnorm_log_posterior <- create_log_unnormalized_posterior_JC(error_copula,
                                                                distributions,
                                                                error_metric,
@@ -1180,7 +1285,7 @@ study_test_performance <- function(study_data, sim_params = NULL) {
     test_set = fold_combinations$test[[i]]
     training_set = fold_combinations$training[[i]]
 
-    posterior = NULL
+    posterior = NA
     prediction = NA
     nr_experts <- total_nr_experts
     if (p$prediction_method == "copula") {
@@ -1258,7 +1363,7 @@ study_test_performance <- function(study_data, sim_params = NULL) {
     } else if (p$prediction_method == "global_opt") {
       prediction <- global_opt_weight_predict(training_set, test_set)
     } else {
-      stop("Unknown prediction method")
+      stop(glue::glue("Unknown prediction method: {p$prediction_method}"))
     }
 
     realization <- unique(test_set$realization)
