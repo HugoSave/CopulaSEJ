@@ -482,8 +482,8 @@ mean_variance_to_gamma_params <- function(mean, variance) {
   # mean = alpha / beta
   # variance = alpha / (beta^2)
   # solve for alpha and beta
-  beta <- mean^2 / variance
-  alpha <- mean * beta
+  alpha <- mean^2 / variance
+  beta <- mean / variance
   c(alpha, beta) # shape, rate
 }
 
@@ -501,13 +501,15 @@ estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_va
     inside_support <- c(support[1] + boundry_offset, support[2] - boundry_offset)
     obs_vec <- pmin(pmax(obs_vec, inside_support[1]), inside_support[2])
   }
-  zero_to_one_obs <- (obs_vec - support[1])/support_width
+  #zero_to_one_obs <- (obs_vec - support[1])/support_width
 
   model <- load_stan_model()
   N = length(obs_vec)
   data_list <- list(
     N = N,
-    Z = zero_to_one_obs,
+    Z = obs_vec,
+    L=support[1],
+    U=support[2],
     alpha_a = A_prior_params[1],
     beta_a = A_prior_params[2],
     alpha_b = B_prior_params[1],
@@ -516,6 +518,7 @@ estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_va
 
   fit_map <- rstan::optimizing(
     model,
+    #verbose=TRUE,
     data = data_list # , check_data = FALSE - not sure if I should have this or not.
   )
   fit_map
@@ -557,8 +560,10 @@ estimate_margin_beta <- function(obs_vec, support=NULL, overshoot=0.1, out_of_bo
     obs_width <- max_obs - min_obs
     support <- c(min_obs - overshoot * obs_width, max_obs + overshoot * obs_width)
   }
+  support_width = support[2] - support[1]
   if (out_of_boundary=="clamp") {
-    inside_support <- c(support[1] + clamp_epsilon, support[2] - clamp_epsilon)
+    boundry_offset <- support_width * clamp_epsilon
+    inside_support <- c(support[1] + boundry_offset, support[2] - boundry_offset)
     obs_vec <- pmin(pmax(obs_vec, inside_support[1]), inside_support[2])
   } else if (out_of_boundary=="discard") {
     obs_vec <- obs_vec |> purrr::discard(\(x) {
@@ -585,7 +590,7 @@ estimate_margin_beta <- function(obs_vec, support=NULL, overshoot=0.1, out_of_bo
   }
   # sum comes from product of log. The joint if error observations are independent
   neg_log_lik <- \(shape1, shape2) -sum(extraDistr::dnsbeta(obs_vec, shape1, shape2, min=support[1], max=support[2], log=TRUE))
-  fit <- stats4::mle(neg_log_lik, start = list(shape1=1.5, shape2=1.5), method="L-BFGS-B", lower=list(shape1=1.001, shape2=1.001))
+  fit <- stats4::mle(neg_log_lik, start = list(shape1=1, shape2=1), method="L-BFGS-B", lower=list(shape1=0.001, shape2=0.001))
   params <- fit@coef
   shape1 = params[1]
   shape2 = params[2]
@@ -598,7 +603,7 @@ estimate_margin_beta <- function(obs_vec, support=NULL, overshoot=0.1, out_of_bo
     extraDistr::pnsbeta(e_vec, shape1, shape2, min=support[1], max=support[2])
   }
 
-  list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(shape1, shape2))
+  list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(shape1, shape2)*support_width + support[1])
 }
 
 beta_approx_middel <- function(shape1, shape2) {
@@ -687,7 +692,7 @@ estimate_margins <- function(observations, supports=NULL, method="beta", oversho
   }
   else if (is.null(supports)) {
     # if null then fill with NULL
-    supports <- rep(NULL, ncol(observations))
+    supports <- rep(list(NULL), ncol(observations))
   }
   if (length(beta_mean) == 1) {
     beta_mean <- rep(beta_mean, nr_dims)
@@ -698,12 +703,14 @@ estimate_margins <- function(observations, supports=NULL, method="beta", oversho
 
   margins <- purrr::map(seq_len(ncol(observations)), function(i) {
     obs <- observations[, i]
-    if (method == "beta"){
+    if (method == "beta_MLE" || method=="beta"){
       return(estimate_margin_beta(obs, supports[[i]], overshoot, out_of_boundary=out_of_boundary))
     } else if (method =="kde") {
       return(estimate_margin_kde(obs, supports[[i]], bw=bw))
-    } else if (method == "beta_hierarchical") {
+    } else if (method == "beta_MAP") {
       return(estimate_margin_beta_hiarch(obs, supports[[i]], beta_mean=beta_mean[i], beta_var=beta_var[i], prior_var=prior_var))
+    } else if (method == "uniform") {
+      return(estimate_margin_uniform(obs, supports[[i]]))
     }
     else {
       stop(glue::glue("Unknown method: {method}"))
@@ -711,6 +718,23 @@ estimate_margins <- function(observations, supports=NULL, method="beta", oversho
 
   })
   margins
+}
+
+estimate_margin_uniform <- function(obs, support, overshoot=0.1) {
+  if (is.null(support)) {
+    support <- widen_support(range(obs), overshoot=overshoot)
+  }
+  pdf <- function(z, log=FALSE) {
+    dunif(z, min=support[1], max=support[2], log=log)
+  }
+  cdf <- function(z, log=FALSE) {
+    punif(z, min=support[1], max=support[2], log.p=log)
+  }
+  list(
+    pdf=pdf,
+    cdf=cdf,
+    approx_middle=(support[2] + support[1])/2
+  )
 }
 
 #' Title

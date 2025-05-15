@@ -31,7 +31,7 @@ res <- fit_and_construct_posterior_indep(
         cdf_metric,
         "vine",
         vine_fit_settings = list(),
-        error_estimation_settings = list(out_of_boundary="clamp", method="beta_hierarchical", bw=1),
+        error_estimation_settings = list(out_of_boundary="clamp", method="beta_MAP", bw=1),
         q_support_restriction = NULL,
         connection_threshold =  0.8
       )

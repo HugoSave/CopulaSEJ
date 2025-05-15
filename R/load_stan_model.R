@@ -12,7 +12,7 @@ load_stan_model <- function(load_precompiled = TRUE, precompiled_model_path = "b
   if (!exists(model_name, envir = .stan_cache) || force_compilation) {
 
     # check if exists saved compiled model
-    if (load_precompiled && file.exists(precompiled_model_path)) {
+    if (load_precompiled && file.exists(precompiled_model_path) && (!force_compilation)) {
       compiled_model <- readRDS(precompiled_model_path)
     } else {
       stan_file <- system.file("stan", model_file_names, package = "CopulaSEJ")

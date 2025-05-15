@@ -72,6 +72,12 @@ test_that("calculate_marginal_posteriors works out of boundary", {
   expect_equal(cdf_right, matrix(1, nrow=nr_supports, ncol=100))
 })
 
+test_that("estimate_margin_beta works for single value", {
+  obs_vec_single_values <- rep(1,20)
+  support <- c(2,3) # values not inside support
+  estimate_margin_beta(obs_vec_single_values, support=support, out_of_boundary = "clamp")
+})
+
 test_that("find_target_q_support works", {
   error_supports <- list(
     c(5,10),

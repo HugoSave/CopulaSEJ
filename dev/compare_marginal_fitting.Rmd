@@ -1,0 +1,41 @@
+---
+title: "compare_marginal_fitting"
+output: html_document
+---
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+
+margin_comparison_file <- "output/margin_estimation_comparison.rds"
+margin_comparisons <- readRDS(margin_comparison_file)
+```
+```{r}
+
+
+
+margin_comparisons$comb <- interaction(margin_comparisons$settings, margin_comparisons$decoupler)
+
+margin_comparisons |> filter(comb=="betaH:1.s((q-m)/(|m|+e))") 
+
+margin_comparisons |>  filter(likelihoods<45)  |> ggplot2::ggplot(aes(x=comb, y=likelihoods)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 10, hjust = 1)) 
+```
+```{r}
+margin_comparisons |> filter(is.finite(likelihoods)) |> group_by(comb) |> summarise(
+  mean_likelihoods=mean(likelihoods),
+  median_likelihoods=median(likelihoods),
+  sd_likelihoods=sd(likelihoods),
+  min_likelihoods=min(likelihoods),
+  max_likelihoods=max(likelihoods),
+)
+```
+```{r}
+
+margin_comparisons |> ggplot(aes(x=cdf_values)) +
+  geom_histogram(boundary=0, binwidth=0.05) +
+  facet_wrap(vars(comb))
+
+```
+
