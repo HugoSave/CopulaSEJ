@@ -770,7 +770,7 @@ get_linear_decoupler <- function(D_tilde, compose_sigmoid=TRUE, m_preprocess=NUL
   decoupler
 }
 
-decoupler_relative <- function(q, m, epsilon=1e-5) {
+decoupler_relative <- function(q, m, epsilon=0.001) {
   m <- typecheck_and_convert_matrix_vector(m, q)
   D = ncol(m)
   E = nrow(m)
@@ -804,17 +804,17 @@ decoupler_relative_inverse <- function(z, m, epsilon=1e-6) {
   z_rep_matrix * (abs(m_rep_matrix) + epsilon) + m_rep_matrix
 }
 
-get_relative_decoupler <- function(D_tilde, compose_sigmoid=FALSE, m_preprocess=NULL, name="relative decoupler", short_name="(q-m)/(|m|+e)", k=6e-2, overshoot=0.1) {
+get_relative_decoupler <- function(D_tilde, compose_sigmoid=FALSE, m_preprocess=NULL, name="relative decoupler", short_name="(q-m)/(|m|+e)", k=6e-2, overshoot=0.1, epsilon=0.001) {
   checkmate::assert(
     checkmate::check_function(m_preprocess, null.ok = TRUE),
     checkmate::check_string(m_preprocess, null.ok = TRUE)
   )
   decoupler <- new_decoupler(
       name=name,
-      f=decoupler_relative,
-      f_prime_q=decoupler_relative_prime_q,
+      f=\(q,m) decoupler_relative(q,m,epsilon=epsilon),
+      f_prime_q=\(q,m) decoupler_relative_prime_q(q,m, epsilon=epsilon),
       f_increasing=decoupler_relative_increasing,
-      f_inverse=decoupler_relative_inverse,
+      f_inverse=\(z,m) decoupler_relative_inverse(z,m, epsilon=epsilon),
       short_name=short_name,
       D_tilde=D_tilde
     )
@@ -842,9 +842,14 @@ get_relative_decoupler <- function(D_tilde, compose_sigmoid=FALSE, m_preprocess=
                                                 sigmoid_inverse_f = purrr::partial(sigmoid_inverse, k=k)
     )
     decoupler_composed$ideal_mean_var = ideal_mean_var
+    class(decoupler_composed) <- c(class(decoupler_composed), "relative_decoupler")
+    decoupler_composed$epsilon=epsilon
+    decoupler_composed$k=k
     return(decoupler_composed)
   }
-
+  decoupler$epsilon=epsilon
+  decoupler$k=k
+  class(decoupler) <- c(class(decoupler), "relative_decoupler")
   decoupler
 }
 
@@ -1189,7 +1194,7 @@ uniform_mean_var <- function(E, D) {
 
 
 get_CDF_decoupler <- function(scale="linear", overshoot=0.1, k_percentiles=c(5,50,95), support_restriction=NULL) {
-  return(
+  decoupler <-
     new_decoupler(
       name="CDF",
       f=\(q,m) indep_CDF(q, m, overshoot=overshoot, k_percentiles=k_percentiles, scale=scale, support_restriction=support_restriction),
@@ -1201,7 +1206,12 @@ get_CDF_decoupler <- function(scale="linear", overshoot=0.1, k_percentiles=c(5,5
       ideal_mean_var = \(quantiles) uniform_mean_var(nrow(quantiles), 1), # always one dimensional output
       short_name="CDF"
     )
-  )
+  class(decoupler) <- c(class(decoupler), "CDF_decoupler")
+  decoupler$overshoot=overshoot
+  decoupler$k_percentiles=k_percentiles
+  decoupler$support_restriction=support_restriction
+  decoupler
+
 }
 
 #' Title
@@ -1301,8 +1311,7 @@ sigmoid_centered_image_inverse_prime <- function(y, L, x_0, k) {
 }
 
 sigmoid_primitive <- function(x, k) {
-  #return(log1pexp(k * x))/k
-  return(log(1+exp(k * x)))/k
+  return(log(1+exp(k * x))/k)
 }
 
 sigmoid_squared <- function(x, k) {

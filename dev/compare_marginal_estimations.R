@@ -36,11 +36,23 @@ compare_decoupler_margin_estimations <- function(studies, settings, seed=42) {
                    rejection_threshold=NULL)
     res <- evalute_marginal_fit(study, decoupler, get_obj_func)
     res$settings <- decoupler_margin_estimation_settings_to_shortname(error_estimation_settings)
-    res$decoupler <- decoupler$short_name
+    res$decoupler <- decoupler_name_with_settings(decoupler)
     res
   }, .progress="studies&margin")
   res <- res |> purrr::list_rbind()
   res
+}
+
+decoupler_name_with_settings <- function(decoupler) {
+  if (inherits(decoupler, "relative_decoupler")) {
+    decoupler_name <- paste0("Relative_mu_G", ":", decoupler$k)
+  } else if (inherits(decoupler, "CDF_decoupler")) {
+    decoupler_name <-"CDF"
+  } else {
+    stop("Unknown decoupler type.")
+
+  }
+
 }
 
 decoupler_margin_estimation_settings_to_shortname <- function(settings) {
@@ -68,26 +80,28 @@ decoupler_margin_estimation_settings_to_shortname <- function(settings) {
 
 decoupler_and_margin_estimation_settings_study <- function() {
   decouplers <- list(
+    get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k=1.5),
     get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k=1),
+    get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k=0.5),
     #get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k=0.5),
     get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k=0.1),
-    ##get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k=0.05),
-    get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k=0.01),
+    #get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k=0.05),
+    #get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k=0.01),
     get_CDF_decoupler()
   )
   error_estimation_settings_list <- list(
-     list(
-       method="beta_MAP",
-       prior_var=1000
-     ),
-     list(
-       method="beta_MAP",
-       prior_var=100
-     ),
-     list(
-       method="beta_MAP",
-       prior_var=10
-     ),
+      list(
+        method="beta_MAP",
+        prior_var=1000
+      ),
+      list(
+        method="beta_MAP",
+        prior_var=100
+      ),
+      list(
+        method="beta_MAP",
+        prior_var=10
+      ),
      list(
        method="beta_MAP",
        prior_var=1
@@ -97,6 +111,9 @@ decoupler_and_margin_estimation_settings_study <- function() {
     ),
     list(
       method="beta_MLE"
+    ),
+    list(
+      method="beta_prior"
     )
   )
   combinations <- tidyr::expand_grid(error_estimation_settings=error_estimation_settings_list, decoupler=decouplers )
@@ -167,32 +184,6 @@ evalute_copula_fit <- function(study_data, decoupler, get_posterior_obj, k_perce
     }) |> purrr::list_rbind()
 }
 
-copula_fits <- list(
-list(copula_model = "vine",
-         vine_fit_settings = list(
-           family_set = c("onepar","indep"),
-           selcrit="mbicv", psi0=0.9,
-           threshold=0.0
-         ),
-     connection_threshold=NULL
-     ),
-list(copula_model = "vine",
-     vine_fit_settings = list(
-       family_set = c("onepar","indep"),
-       selcrit="mbicv", psi0=0.9,
-       threshold=0.8
-     ),
-     connection_threshold=NULL
-     ),
-list(copula_model = "vine",
-     vine_fit_settings = list(
-       family_set = c("onepar","indep"),
-       selcrit="mbicv", psi0=0.9,
-       threshold=0.8
-     ),
-     connection_threshold=0.05)
-)
-
 run_decoupler_margin_comparison <- function() {
   library(devtools)
   devtools::load_all(".")
@@ -202,7 +193,6 @@ run_decoupler_margin_comparison <- function() {
   res <- compare_decoupler_margin_estimations(studies, settings)
   print("Saving to file dev/output/margin_estimation_comparison.rds")
   saveRDS(res, file = "dev/output/margin_estimation_comparison.rds")
-
 }
 
 if (!interactive()) {

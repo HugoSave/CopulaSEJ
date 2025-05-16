@@ -53,6 +53,76 @@ test_error_metric <- function(e_metric) {
   expect_equal(err_inv, matrix(q, nrow=length(q), ncol=ncol(m_all)))
 }
 
+test_that("sigmoid_composed_affine_decoupler_ideal_mean_var small assessments ", {
+  quantiles <- matrix(c(
+    1e-06, 1.0e-05, 1e-04,
+    1e-09, 1.0e-02, 5e-02,
+    1e-06, 2.5e-06, 1e-05,
+    3e-06, 1.0e-05, 2e-05,
+    1e-04, 1.0e-03, 5e-02
+  ), nrow = 5, byrow = TRUE)
+
+  quantiles_extended <- add_0_and_100_percentiles_matrix(quantiles)
+  estimate_mean_from_quantiles(quantiles_extended, c(0.05,0.5, 0.95))
+  decoupler <- get_relative_decoupler(D_tilde=1, compose_sigmoid = FALSE, m_preprocess="mean_G", epsilon=0.01)
+  k = 0.1
+  L_star_Q = min(quantiles_extended)
+  U_star_Q = max(quantiles_extended)
+  L_Z_vals <- sigmoid(decoupler$f(L_star_Q, quantiles), k=k)
+
+
+  set.seed(1)
+  dists <- linear_distribution_interpolation_matrix(quantiles_extended, c(0, 0.05, 0.5, 0.95, 1))
+  samples <- dists |> purrr::map2(seq_along(dists), \(dist, e) {
+    s <- dist$sample(1000000)
+    Z_orig <- decoupler$f(s, quantiles)[,e,1] # NxEx1 to N
+    Z_final <- sigmoid(Z_orig, k=k)
+    list(mean=mean(Z_final), var=var(Z_final), L=min(Z_final), U=max(Z_final))
+  }) |> purrr::list_transpose()
+
+  means_vars <- sigmoid_composed_affine_decoupler_ideal_mean_var(decoupler, k=k, m=quantiles, quantiles=quantiles_extended, cum_prob=c(0, 0.05,0.5,0.95, 1))
+
+  # we actually currently are failing the last test. Not numerically stable enough. I think we would need a MC backup if the numerical part fails
+  expect_equal(means_vars$means[,1],samples$mean, tolerance = 0.001)
+  expect_equal(means_vars$vars[,1],samples$var, tolerance = 0.001)
+
+})
+
+test_that("sigmoid_composed_affine_decoupler_ideal_mean_var other k ", {
+  quantiles <- matrix(c(
+    21.18,  35.30, 52.95,
+    -30.00, -10.00, 10.00,
+    -5.00,  10.00, 60.00,
+    21.18,  49.42, 70.60
+  ), nrow = 4, byrow = TRUE)
+  quantiles_extended <- add_0_and_100_percentiles_matrix(quantiles)
+  estimate_mean_from_quantiles(quantiles_extended, c(0.05,0.5, 0.95))
+  decoupler <- get_relative_decoupler(D_tilde=1, compose_sigmoid = FALSE, m_preprocess="mean_G")
+  k = 0.1
+  L_star_Q = min(quantiles_extended)
+  U_star_Q = max(quantiles_extended)
+  L_Z_vals <- sigmoid(decoupler$f(L_star_Q, quantiles), k=k)
+
+
+  set.seed(1)
+  dists <- linear_distribution_interpolation_matrix(quantiles_extended, c(0, 0.05, 0.5, 0.95, 1))
+  samples <- dists |> purrr::map2(seq_along(dists), \(dist, e) {
+    s <- dist$sample(1000000)
+    Z_orig <- decoupler$f(s, quantiles)[,e,1] # NxEx1 to N
+    Z_final <- sigmoid(Z_orig, k=k)
+    list(mean=mean(Z_final), var=var(Z_final), L=min(Z_final), U=max(Z_final))
+  }) |> purrr::list_transpose()
+
+  means_vars <- sigmoid_composed_affine_decoupler_ideal_mean_var(decoupler, k=k, m=quantiles, quantiles=quantiles_extended, cum_prob=c(0, 0.05,0.5,0.95, 1))
+
+  expect_equal(dim(means_vars$means),c(4,1))
+  expect_equal(dim(means_vars$vars),c(4,1))
+  # we actually currently are failing the last test. Not numerically stable enough. I think we would need a MC backup if the numerical part fails
+  expect_equal(means_vars$means[,1],samples$mean, tolerance = 0.001)
+  expect_equal(means_vars$vars[,1],samples$var, tolerance = 0.001)
+
+})
+
 test_that("sigmoid_composed_affine_decoupler_ideal_mean_var works", {
   quantiles = matrix(c(-8, 2, 3,
                5, 7, 15,

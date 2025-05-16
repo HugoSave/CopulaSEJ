@@ -6,15 +6,19 @@ output: html_document
 ```{r}
 library(ggplot2)
 library(tidyverse)
+library(goftest)
+library(purrr)
 
 margin_comparison_file <- "output/margin_estimation_comparison.rds"
 margin_comparisons <- readRDS(margin_comparison_file)
+margin_comparisons$comb <- interaction(margin_comparisons$settings, margin_comparisons$decoupler)
+split_by_setting <- margin_comparisons |> split(margin_comparisons$comb) 
+settings_names <- split_by_setting |> map_chr(\(df) df$comb |> unique() |> as.character())
+
 ```
 ```{r}
 
 
-
-margin_comparisons$comb <- interaction(margin_comparisons$settings, margin_comparisons$decoupler)
 
 margin_comparisons |> filter(comb=="betaH:1.s((q-m)/(|m|+e))") 
 
@@ -37,5 +41,54 @@ margin_comparisons |> ggplot(aes(x=cdf_values)) +
   geom_histogram(boundary=0, binwidth=0.05) +
   facet_wrap(vars(comb))
 
+```
+```{r}
+margin_comparisons |> ggplot(aes(x=cdf_values)) +
+  stat_ecdf() +
+  geom_abline(slope=1,intercept=0,linetype="dashed") + 
+  facet_wrap(vars(comb))
+```
+```{r}
+ecdfs <- split_by_setting |> purrr::map(\(df) {
+  ecdf(df$cdf_values)
+})
+plot(ecdfs[[1]])
+```
+```{r}
+# Compute distance to uniform distribution
+# for each setting
+
+distance_to_uniform <- function(ecdf, x) {
+  abs(ecdf(x) - punif(x, 0, 1))
+}
+
+distance_to_uniforms <- ecdfs |> purrr::map(\(emperical_cdf) {
+  x <- knots(emperical_cdf)
+  distances <- distance_to_uniform(emperical_cdf, x)
+  list(
+    avg_abs_distance = mean(distances),
+    max_distance = max(distances)
+  )
+}) |> purrr::list_transpose()
+
+# ks_tests <- split_by_setting |> purrr::map(\(df) {
+#   ks.test(df$cdf_values, y=punif)
+# })
+cvm_statistic <- split_by_setting |> purrr::map_dbl(\(df) {
+  cvm.test(df$cdf_values, null="punif")$statistic
+})
+
+# combine to a table
+tibble(
+  setting = settings_names,
+  avg_abs_distance = distance_to_uniforms$avg_abs_distance,
+  max_distance = distance_to_uniforms$max_distance,
+  cvm_statistic = cvm_statistic
+)
+
+
+# cvm_tests |> purrr::map(\(test) { # This is not too informative because I have so many samples it gives really low p values.
+#   test$p.value
+# })
 ```
 

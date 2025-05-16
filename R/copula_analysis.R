@@ -466,16 +466,40 @@ load_stan_model_beta_hiarch <- function() {
   stan_model
 }
 
-mean_variance_to_beta_params <- function(mean, variance, min_value=1e-6) {
+mean_variance_to_beta_params <- function(mean, variance, L, U, epsilon=1e-6) {
   stopifnot(variance < 0.25) # variance must be less than 0.25 to be a beta distribution
   # mean = alpha / (alpha + beta)
   # variance = alpha * beta / ((alpha + beta)^2 * (alpha + beta + 1))
   # solve for alpha and beta
-  alpha <- mean * (mean * (1 - mean) / variance - 1)
-  beta <- (1 - mean) * (mean * (1 - mean) / variance - 1)
-  alpha <- pmax(alpha, min_value)
-  beta <- pmax(beta, min_value)
-  c(alpha, beta) # shape, rate
+  # (mean-U)*(mean-L)
+  #tmp_term <- (L * U - L * mean - U * mean + mean^2 + variance) / (variance * (L - U))
+  #alpha <- (L-mean) *tmp_term
+  #beta <- (mean - U) * tmp_term
+  if (mean < L || mean > U) {
+    stop(glue::glue("Mean {round(mean, digits=3)} is outside of the support ({L},{U})."))
+  }
+  max_variance <- (mean-L) * (U-mean)
+  if (variance >= max_variance) {
+    warning(glue::glue("Variance {round(variance, digits=3)} is too large with mean {round(mean, digits=3)} and support ({L},{U}). Setting variance to (mean-L) * (U-mean)-epsilon={round(max_variance-epsilon, digits=3)}"))
+    variance <- max_variance - epsilon
+  }
+
+  width = U-L
+  mean_scaled <- (mean - L) / width
+  variance_scaled <- variance / (width^2)
+
+  alpha = mean_scaled*(mean_scaled * (1-mean_scaled)/variance_scaled - 1)
+  beta = alpha/mean_scaled - alpha
+
+  alpha <- pmax(alpha, epsilon) # rounding errors
+  beta <- pmax(beta, epsilon) # rounding errors
+  c(alpha, beta)
+
+  #alpha <- mean * (mean * (1 - mean) / variance - 1)
+  #beta <- (1 - mean) * (mean * (1 - mean) / variance - 1)
+  #alpha <- pmax(alpha, min_value) # rounding errors
+  #beta <- pmax(beta, min_value) # rounding errors
+  #c(alpha, beta) # shape, rate
 }
 
 mean_variance_to_gamma_params <- function(mean, variance) {
@@ -487,8 +511,20 @@ mean_variance_to_gamma_params <- function(mean, variance) {
   c(alpha, beta) # shape, rate
 }
 
+estimate_margin_beta_prior <- function(support, beta_mean, beta_var) {
+  beta_vars <- mean_variance_to_beta_params(beta_mean, beta_var, support[1], support[2])
+
+  pdf <- function(e_vec, log=FALSE) {
+    extraDistr::dnsbeta(e_vec, beta_vars[1], beta_vars[2], min=support[1], max=support[2], log=log)
+  }
+  cdf <- function(e_vec, log=FALSE) {
+    extraDistr::pnsbeta(e_vec, beta_vars[1], beta_vars[2], min=support[1], max=support[2], log.p=log)
+  }
+  list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(beta_vars[1], beta_vars[2], support[1], support[2]))
+}
+
 estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_var=1/12, prior_var=0.1, clamp_epsilon=0.001, out_of_boundary="clamp") {
-  beta_param_centers <- mean_variance_to_beta_params(beta_mean, beta_var) #
+  beta_param_centers <- mean_variance_to_beta_params(beta_mean, beta_var, support[1], support[2]) # Wait I am doing this a bit wrong... Needs to be adjusted for the scaling
   A_prior_params <- mean_variance_to_gamma_params(beta_param_centers[1], prior_var)
   B_prior_params <- mean_variance_to_gamma_params(beta_param_centers[2], prior_var)
 
@@ -534,7 +570,7 @@ estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_va
     extraDistr::pnsbeta(e_vec, map_a, map_b, min=support[1], max=support[2])
   }
 
-  list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(map_a, map_b))
+  list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(map_a, map_b, support[1], support[2]))
 }
 
 
@@ -603,16 +639,18 @@ estimate_margin_beta <- function(obs_vec, support=NULL, overshoot=0.1, out_of_bo
     extraDistr::pnsbeta(e_vec, shape1, shape2, min=support[1], max=support[2])
   }
 
-  list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(shape1, shape2)*support_width + support[1])
+  list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(shape1, shape2, support[1], support[2]))
 }
 
-beta_approx_middel <- function(shape1, shape2) {
+beta_approx_middel <- function(shape1, shape2, L, U) {
   if (shape1 > 1 && shape2 > 1) {
     mode_standard <- (shape1 - 1)/(shape1 + shape2 - 2) # formula for mode of standard beta distribution
-    return(mode_standard)
+    mode_general <- mode_standard * (U - L) + L
+    return(mode_general)
   } else {
     mean_standard <- (shape1/(shape1 + shape2)) # formula for mean of standard beta distribution
-    return(mean_standard)
+    mean_general <- mean_standard * (U - L) + L
+    return(mean_general)
   }
 
 }
@@ -711,6 +749,8 @@ estimate_margins <- function(observations, supports=NULL, method="beta", oversho
       return(estimate_margin_beta_hiarch(obs, supports[[i]], beta_mean=beta_mean[i], beta_var=beta_var[i], prior_var=prior_var))
     } else if (method == "uniform") {
       return(estimate_margin_uniform(obs, supports[[i]]))
+    } else if (method == "beta_prior") {
+      return(estimate_margin_beta_prior(supports[[i]], beta_mean[i], beta_var[i]))
     }
     else {
       stop(glue::glue("Unknown method: {method}"))
@@ -835,10 +875,12 @@ widen_support <- function(support, overshoot, support_restriction=NULL) {
   new_support
 }
 
-ideal_means_vars_non_finite_to_uniform <- function(means_vars) {
+ideal_means_vars_non_finite_to_uniform <- function(means_vars, supports) {
   # if the means and vars are not finite, set them to uniform
-  means_vars$means[!is.finite(means_vars$means)] <- 0.5
-  means_vars$vars[!is.finite(means_vars$vars)] <- 1/12
+  target_mean <- supports |> purrr::map_dbl(mean) |> matrix(nrow=nrow(means_vars$means), ncol=ncol(means_vars$means), byrow=TRUE)
+  target_var <- supports |> purrr::map_dbl(\(support) (support[2] - support[1])^2/12) |> matrix(nrow=nrow(means_vars$vars), ncol=ncol(means_vars$vars), byrow=TRUE)
+  means_vars$means[!is.finite(means_vars$means)] <- target_mean[!is.finite(means_vars$means)]
+  means_vars$vars[!is.finite(means_vars$vars)] <- target_var[!is.finite(means_vars$vars)]
   means_vars
 }
 
@@ -925,7 +967,7 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
   decoupler_support <- target_q_support_to_independence_supports(widend_support, test_matrix, decoupler)
 
   if (is.function(decoupler$ideal_mean_var)) {
-    ideal_vars <- decoupler$ideal_mean_var(test_matrix) |> ideal_means_vars_non_finite_to_uniform()
+    ideal_vars <- decoupler$ideal_mean_var(test_matrix) |> ideal_means_vars_non_finite_to_uniform(supports=decoupler_support)
     ideal_means <- ideal_vars$means |> flatten_matrix_row_by_row()
     ideal_vars <- ideal_vars$vars |> flatten_matrix_row_by_row()
     error_estimation_settings$beta_mean <- ideal_means
