@@ -51,7 +51,7 @@ results_df <- dplyr::bind_rows(results)
 
 #saveRDS(results_df, "dev/output/performance_comparison_new.rds")
 #results_df<-readRDS("output/performance_comparison_new.rds")
-results_df<-readRDS("output/compare_errors_and_summarizers_simulation.rds")$results_df
+results_df<-readRDS("output/compare_errors_and_summarizers_simulation.rds")$results
 #results_df <- readRDS("output/performance_comparison.rds")
 
 #results_df <- results_df |> mutate(prediction_method = if_else(str_starts(prediction_method, "DP"), "product", prediction_method))

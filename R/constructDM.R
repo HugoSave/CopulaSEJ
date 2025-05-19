@@ -5,7 +5,7 @@
 # Furthermore it is assumed that the first three columns are the inner quantiles
 # so not including 0 and 100.
 # L and U are vectors contatining the lower and upper bounds for each question.
-# quantiles are the quantiles corresponding to the assemenets and also the 
+# quantiles are the quantiles corresponding to the assemenets and also the
 # points where the DM will be evaluated
 constructDM = function(assessments, weights_, DMx, L, U, quantiles) {
   stopifnot(length(assessments) > 0)

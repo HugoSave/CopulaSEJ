@@ -43,10 +43,12 @@ margin_comparisons |> ggplot(aes(x=cdf_values)) +
 
 ```
 ```{r}
-margin_comparisons |> ggplot(aes(x=cdf_values)) +
+margin_comp_p <- margin_comparisons |> ggplot(aes(x=cdf_values)) +
   stat_ecdf() +
   geom_abline(slope=1,intercept=0,linetype="dashed") + 
   facet_wrap(vars(comb))
+ggsave("output/marginal_comparisons.pdf", margin_comp_p, width=10, height=10)
+margin_comp
 ```
 ```{r}
 ecdfs <- split_by_setting |> purrr::map(\(df) {

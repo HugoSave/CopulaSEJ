@@ -19,7 +19,7 @@ load_stan_model <- function(load_precompiled = TRUE, precompiled_model_path = "b
       if (stan_file == "") {
         stop("Stan file not found: ", model_file_names)
       }
-      message("Compiling model")
+      message("Compiling stan model. This might take a few minutes the first time.")
       compiled_model <- rstan::stan_model(file = stan_file)
 
     # Optionally save the compiled model

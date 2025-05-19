@@ -37,7 +37,15 @@ prediction_method_shortname <- function(prediction_method) {
   } else if (prediction_method == "density_product") {
     return("DP")
   }
-  else {
+  else if (prediction_method == "median_average") {
+    return("MA")
+  } else if (prediction_method == "equal_weights") {
+    return("EW")
+  } else if (prediction_method == "classical_global_opt") {
+    return("CGO")
+  } else if (prediction_method == "uniform") {
+    return("Unif")
+  } else {
     return(prediction_method)
   }
 }
@@ -63,11 +71,12 @@ connection_threshold_shortname <- function(connection_threshold) {
 
 
 parameter_shortname <- function(sim_params, sep="") {
-  if (sim_params$prediction_method == "density_product") {
-    paste(prediction_method_shortname(sim_params$prediction_method),
-          sim_params$overshoot,
-          sep=sep)
-  } else {
+  method = sim_params$prediction_method
+  # no parameter methods
+  if (method %in% c("density_product", "uniform", "median_average", "equal_weights", "classical_global_opt")) {
+    return(prediction_method_shortname(method))
+  }
+  else {
     paste(
       prediction_method_shortname(sim_params$prediction_method),
       copula_shortname(sim_params$copula_model),
@@ -160,27 +169,93 @@ run_study_find_posterior <- function(studies, params, sim_group="tmp"){
 
 sample_and_add_metrics <- function(analys_res) {
   df <- analys_res$results
-  browser()
-  list_of_metrics <- purrr::pmap(list(df$posterior, df$realization, df$prediction), \(post, realization, prediction) {
+  list_of_metrics <- purrr::pmap(list(df$posterior, df$realization), \(post, realization) {
     if (!is.list(post)) {
       return(performance_metrics_list()) # defaults to NA for all other metrics
     } else {
-      return(posterior_performance_metrics(post$logDM, post$support, realization, num_samples=1000))
+      return(posterior_performance_metrics(post$logDM, post$support, realization, num_samples=1000, mean_value=post$mean, median_value=post$median))
     }
   })
 
   metric_df <- list_of_metrics |> purrr::list_transpose() |> tibble::as_tibble()
   results <- dplyr::bind_cols(df, metric_df)
+  results$prediction <- dplyr::if_else(is.finite(results$prediction), results$prediction, results$median)
   # results$prediction <- results$median
   results$error = results$prediction - results$realization
   results$rel_error = results$error / results$realization
-  results$support = results$posterior |> purrr::map(\(x) ifelse(is.na(x), NA, x$support))
+  results$support = results$posterior |> purrr::map(\(x) if(is.list(x)) x$support else NA)
   results
 }
 
 push_list <- function(list, item) {
   list[[length(list) + 1]] <- item
   return(list)
+}
+
+run_benchmarking_methods <- function() {
+  library(devtools)
+  load_all(".")
+  source("dev/dev_utils.R")
+
+  file_name <- "dev/output/data49_nov24.rds"
+  numerical_col_names <- c(k_percentiles_to_colname(c(5, 50, 95)), "realization")
+  studies <- load_data_49(relative_dev_folder = FALSE)
+  #studies <- filter_studies_few_questions(studies, min_questions=11)
+  #studies <- filter_study_remove_ids(studies, study_ids=7)
+
+  data_list_short <-studies[1]
+  param_list <- list()
+
+  param_list <- push_list(param_list,
+                          default_simulation_params(
+                            prediction_method = "density_product",
+                            overshoot=0.1,
+                            summarizing_function = get_three_quantiles_summarizing_function(),
+                            q_support_restriction = NULL,
+                          ))
+
+  param_list <- push_list(param_list,
+                          default_simulation_params(
+                            prediction_method = "median_average",
+                            summarizing_function = get_three_quantiles_summarizing_function(),
+                          ))
+
+  param_list <- push_list(param_list,
+                          default_simulation_params(
+                            prediction_method = "equal_weights"
+                          ))
+
+  param_list <- push_list(param_list,
+                          default_simulation_params(
+                            prediction_method = "classical_global_opt"
+                          ))
+
+
+  param_list <- push_list(param_list,
+                          default_simulation_params(
+                            prediction_method = "uniform"
+                          ))
+
+  result_list <- purrr::map(param_list, \(x) {
+    analys_res <- run_study_find_posterior(data_list_short, x, "RejTest")
+    results_with_metrics <- sample_and_add_metrics(analys_res)
+    results_with_metrics$posterior <- NULL
+    file_name <- create_file_name(x, "RejTest")
+    print(glue::glue("Saving results to {file_name}"))
+    saveRDS(results_with_metrics, file_name)
+    analys_res$results <- results_with_metrics
+    analys_res
+  })
+
+  res_combined <- result_list |> combine_simulation_results()
+
+  saveRDS(res_combined, "dev/output/benchmarking_methods_performance.rds")
+
+  print("Results saved to dev/output/benchmarking_methods_performance.rds")
+}
+
+if (!interactive()) {
+  run_benchmarking_methods()
 }
 
 if (!interactive()) {
@@ -220,153 +295,159 @@ if (!interactive()) {
 
   param_list <- push_list(param_list,
                           default_simulation_params(
-                            prediction_method = "equal_weight"
+                            prediction_method = "equal_weights"
                           ))
 
   param_list <- push_list(param_list,
                           default_simulation_params(
-                            prediction_method = "classical_model"
+                            prediction_method = "classical_global_opt"
                           ))
 
-  param_list <- push_list(param_list,
-    default_simulation_params(
-    prediction_method = "copula",
-    copula_model = "vine",
-    error_metric = get_CDF_decoupler(),
-    summarizing_function = get_three_quantiles_summarizing_function(),
-    rejection_threshold = NULL,
-    error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=1),
-    vine_fit_settings = list(family_set = c("onepar","indep"),
-                             selcrit="mbicv", threshold=0.7),
-    q_support_restriction = NULL
-  ))
 
   param_list <- push_list(param_list,
                           default_simulation_params(
-                            prediction_method = "copula",
-                            copula_model = "vine",
-                            error_metric = get_CDF_decoupler(),
-                            summarizing_function = get_three_quantiles_summarizing_function(),
-                            rejection_threshold = NULL,
-                            error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=1),
-                            vine_fit_settings = list(family_set = c("onepar","indep"),
-                                                     selcrit="mbicv", threshold=0.7),
-                            q_support_restriction = NULL #'non_negative'
+                            prediction_method = "uniform"
                           ))
 
-  param_list <- push_list(param_list,
-                          modifyList(param_list[[1]],
-                                     list(
-                                       vine_fit_settings = list(family_set = c("onepar","indep"),
-                                                                selcrit="mbicv", threshold=0),
-                                       connection_threshold=0.8
-                                     ))
-  )
-  param_list <- push_list(param_list,
-                          modifyList(param_list[[1]],
-                                     list(
-                                       connection_threshold=0.6
-                                     ))
-  )
+ # param_list <- push_list(param_list,
+ #   default_simulation_params(
+ #   prediction_method = "copula",
+ #   copula_model = "vine",
+ #   error_metric = get_CDF_decoupler(),
+ #   summarizing_function = get_three_quantiles_summarizing_function(),
+ #   rejection_threshold = NULL,
+ #   error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=1),
+ #   vine_fit_settings = list(family_set = c("onepar","indep"),
+ #                            selcrit="mbicv", threshold=0.7),
+ #   q_support_restriction = NULL
+ # ))
+#
+ # param_list <- push_list(param_list,
+ #                         default_simulation_params(
+ #                           prediction_method = "copula",
+ #                           copula_model = "vine",
+ #                           error_metric = get_CDF_decoupler(),
+ #                           summarizing_function = get_three_quantiles_summarizing_function(),
+ #                           rejection_threshold = NULL,
+ #                           error_estimation_settings = list(out_of_boundary="clamp", method="kde", bw=1),
+ #                           vine_fit_settings = list(family_set = c("onepar","indep"),
+ #                                                    selcrit="mbicv", threshold=0.7),
+ #                           q_support_restriction = NULL #'non_negative'
+ #                         ))
+#
+ # param_list <- push_list(param_list,
+ #                         modifyList(param_list[[1]],
+ #                                    list(
+ #                                      vine_fit_settings = list(family_set = c("onepar","indep"),
+ #                                                               selcrit="mbicv", threshold=0),
+ #                                      connection_threshold=0.8
+ #                                    ))
+ # )
+ # param_list <- push_list(param_list,
+ #                         modifyList(param_list[[1]],
+ #                                    list(
+ #                                      connection_threshold=0.6
+ #                                    ))
+ # )
+#
+ # param_list <- push_list(param_list,
+ #   modifyList(param_list[[1]],
+ #            list(
+ #              rejection_threshold = 0.05,
+ #              rejection_min_experts = 1,
+ #              rejection_test = "distance_correlation"
+ #            ))
+ # )
+#
+ # param_list <- push_list(param_list,
+ #                         modifyList(param_list[[1]],
+ #                                    list(
+ #                                      rejection_threshold = 0.1
+ #                                    ))
+ # )
+#
+ # param_list <- push_list(param_list,
+ #   modifyList(param_list[[length(param_list)]],
+ #                      list(
+ #                        rejection_threshold = 0.05,
+ #                        rejection_test = "classical_calibration"
+ #                      ))
+ # )
+#
+ # param_list <- push_list(param_list,
+ #                      modifyList(param_list[[1]],
+ #                                 list(copula_model="indep"))
+ #                      )
+#
+ # param_list <- push_list(param_list,
+ #                      modifyList(param_list[[length(param_list)]],
+ #                      list(
+ #                        rejection_threshold = 0.05,
+ #                        rejection_min_experts = 1,
+ #                        rejection_test = "distance_correlation"
+ #                      ))
+ # )
+#
+ # param_list <- push_list(param_list,
+ #                      modifyList(param_list[[length(param_list)]],
+ #                                 list(
+ #                                   rejection_test = "classical_calibration"
+ #                                 ))
+ # )
+#
+#
+ # param_list <- push_list(param_list, default_simulation_params(
+ #   prediction_method = "perfect_expert",
+ #   copula_model = "frank",
+ #   error_metric = get_linear_error_metric(),
+ #   summarizing_function = get_median_summarizing_function(),
+ #   rejection_threshold = NULL,
+ #   q_support_restriction = 'non_negative'
+ # ))
+#
+ # param_list <- push_list(param_list,
+ #                      modifyList(param_list[[length(param_list)]],
+ #                                 list(
+ #                                   rejection_threshold = 0.05,
+ #                                   rejection_min_experts = 1,
+ #                                   rejection_test = "distance_correlation"
+ #                                 ))
+ #                      )
+#
+ # param_list <- push_list(param_list,
+ #                      modifyList(param_list[[length(param_list)]],
+ #                                 list(
+ #                                   rejection_test = "classical_calibration"
+ #                                 ))
+ # )
+#
+ # param_list <- push_list(param_list,
+ #                     default_simulation_params(
+ #                       prediction_method = "perfect",
+ #                       copula_model = "frank",
+ #                       error_metric = get_linear_error_metric(),
+ #                       summarizing_function = get_median_summarizing_function(),
+ #                       rejection_threshold = NULL,
+ #                       q_support_restriction = 'non_negative'
+ #                      )
+ # )
 
-  param_list <- push_list(param_list,
-    modifyList(param_list[[1]],
-             list(
-               rejection_threshold = 0.05,
-               rejection_min_experts = 1,
-               rejection_test = "distance_correlation"
-             ))
-  )
-
-  param_list <- push_list(param_list,
-                          modifyList(param_list[[1]],
-                                     list(
-                                       rejection_threshold = 0.1
-                                     ))
-  )
-
-  param_list <- push_list(param_list,
-    modifyList(param_list[[length(param_list)]],
-                       list(
-                         rejection_threshold = 0.05,
-                         rejection_test = "classical_calibration"
-                       ))
-  )
-
-  param_list <- push_list(param_list,
-                       modifyList(param_list[[1]],
-                                  list(copula_model="indep"))
-                       )
-
-  param_list <- push_list(param_list,
-                       modifyList(param_list[[length(param_list)]],
-                       list(
-                         rejection_threshold = 0.05,
-                         rejection_min_experts = 1,
-                         rejection_test = "distance_correlation"
-                       ))
-  )
-
-  param_list <- push_list(param_list,
-                       modifyList(param_list[[length(param_list)]],
-                                  list(
-                                    rejection_test = "classical_calibration"
-                                  ))
-  )
-
-
-  param_list <- push_list(param_list, default_simulation_params(
-    prediction_method = "perfect_expert",
-    copula_model = "frank",
-    error_metric = get_linear_error_metric(),
-    summarizing_function = get_median_summarizing_function(),
-    rejection_threshold = NULL,
-    q_support_restriction = 'non_negative'
-  ))
-
-  param_list <- push_list(param_list,
-                       modifyList(param_list[[length(param_list)]],
-                                  list(
-                                    rejection_threshold = 0.05,
-                                    rejection_min_experts = 1,
-                                    rejection_test = "distance_correlation"
-                                  ))
-                       )
-
-  param_list <- push_list(param_list,
-                       modifyList(param_list[[length(param_list)]],
-                                  list(
-                                    rejection_test = "classical_calibration"
-                                  ))
-  )
-
-  param_list <- push_list(param_list,
-                      default_simulation_params(
-                        prediction_method = "perfect",
-                        copula_model = "frank",
-                        error_metric = get_linear_error_metric(),
-                        summarizing_function = get_median_summarizing_function(),
-                        rejection_threshold = NULL,
-                        q_support_restriction = 'non_negative'
-                       )
-  )
-
-  result_list <- purrr::map(param_list[2:3], \(x) {
-    analys_res <- run_study_find_posterior(data_list_short, x, "RejTest")
-    results_with_metrics <- sample_and_add_metrics(analys_res)
-    results_with_metrics$posterior <- NULL
-    file_name <- create_file_name(x, "RejTest")
-    print(glue::glue("Saving results to {file_name}"))
-    saveRDS(results_with_metrics, file_name)
-    analys_res$results <- results_with_metrics
-    analys_res
-  })
-
-  res_combined <- result_list |> combine_simulation_results()
-
-  saveRDS(res_combined, "dev/output/compare_errors_and_summarizers_simulation.rds")
-
-  print("Results saved to dev/output/compare_errors_and_summarizers_simulation.rds")
+  # result_list <- purrr::map(param_list, \(x) {
+  #   analys_res <- run_study_find_posterior(data_list_short, x, "RejTest")
+  #   results_with_metrics <- sample_and_add_metrics(analys_res)
+  #   results_with_metrics$posterior <- NULL
+  #   file_name <- create_file_name(x, "RejTest")
+  #   print(glue::glue("Saving results to {file_name}"))
+  #   saveRDS(results_with_metrics, file_name)
+  #   analys_res$results <- results_with_metrics
+  #   analys_res
+  # })
+#
+  # res_combined <- result_list |> combine_simulation_results()
+#
+  # saveRDS(res_combined, "dev/output/compare_errors_and_summarizers_simulation.rds")
+#
+  # print("Results saved to dev/output/compare_errors_and_summarizers_simulation.rds")
 
 
 #   run_study_find_posterior(data_list_short, get_linear_decoupler(), get_median_summarizing_function(), prediction_method="copula",

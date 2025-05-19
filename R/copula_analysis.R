@@ -748,7 +748,10 @@ estimate_margins <- function(observations, supports=NULL, method="beta", oversho
     } else if (method == "beta_MAP") {
       return(estimate_margin_beta_hiarch(obs, supports[[i]], beta_mean=beta_mean[i], beta_var=beta_var[i], prior_var=prior_var))
     } else if (method == "uniform") {
-      return(estimate_margin_uniform(obs, supports[[i]]))
+      if (is.null(supports[[i]])) {
+        supports[[i]] <- range(obs) |> widen_support(overshoot=overshoot)
+      }
+      return(estimate_margin_uniform(supports[[i]]))
     } else if (method == "beta_prior") {
       return(estimate_margin_beta_prior(supports[[i]], beta_mean[i], beta_var[i]))
     }
@@ -760,10 +763,21 @@ estimate_margins <- function(observations, supports=NULL, method="beta", oversho
   margins
 }
 
-estimate_margin_uniform <- function(obs, support, overshoot=0.1) {
-  if (is.null(support)) {
-    support <- widen_support(range(obs), overshoot=overshoot)
+uniform_prediction_posterior <- function(test_matrix, overshoot=0.1, support_restriction=NULL) {
+  support <- range(test_matrix) |> widen_support(overshoot=0.1, support_restriction=support_restriction)
+  uniform_dist <- estimate_margin_uniform(support)
+
+  logDM <- function(q) {
+    uniform_dist$pdf(q, log=TRUE)
   }
+  uniform_dist$logDM <- logDM
+  return(
+    uniform_dist
+  )
+
+}
+
+estimate_margin_uniform <- function(support) {
   pdf <- function(z, log=FALSE) {
     dunif(z, min=support[1], max=support[2], log=log)
   }
@@ -773,7 +787,10 @@ estimate_margin_uniform <- function(obs, support, overshoot=0.1) {
   list(
     pdf=pdf,
     cdf=cdf,
-    approx_middle=(support[2] + support[1])/2
+    mean=mean(support),
+    median=mean(support),
+    support=support,
+    approx_middle=median
   )
 }
 
@@ -1270,29 +1287,98 @@ study_data_to_assessment_matrices <- function(study_data, percentiles) {
   split.data.frame(assessments, study_data$expert_id)
 }
 
-global_opt_weight_predict <- function(training_set, test_set) {
-  # Only works for data with quantiles at 5%, 50% and 90%
-  percentiles <- c(5, 50, 95)
-  training_assessments <- study_data_to_assessment_matrices(training_set, percentiles)
-  realisations <- training_set |> dplyr::distinct(question_id, realization) |> arrange(question_id) |> pull(realization)
-  optimal_weights <- perfWeights_opt(training_assessments, realisations, percentiles /
-                                       100)
-
-  support <- calculate_assessment_support(test_set) |> dplyr::select(L_star, U_star)
-  test_assessments <- study_data_to_assessment_matrices(test_set, percentiles)
-  DM <- constructDM(
-    test_assessments,
-    optimal_weights,
-    NULL,
-    support$L_star,
-    support$U_star,
-    percentiles / 100
-  )
-  median <- DM[1, 2] # single row, second entry is the median
-  median
+split_training_array_by_expert <- function(training_array) {
+  checkmate::assert_array(training_array, "numeric", d=3)
+  E = dim(training_array)[2]
+  training_list <- purrr::map(seq_len(E), function(e) {
+    training_array[,e,, drop=TRUE] # returns NxD matrices
+  })
 }
 
-equal_weight_predict <- function(test_set) {
+split_test_matrix_by_expert <- function(test_matrix, row_matrix_out=TRUE) {
+  checkmate::assert_matrix(test_matrix, "numeric")
+  E = nrow(test_matrix)
+  test_list <- purrr::map(seq_len(E), function(e) {
+    if (row_matrix_out) {
+      test_matrix[e,, drop=FALSE] # returns 1xD matrices
+    } else {
+      test_matrix[e, drop=TRUE] # returns D vectors
+
+    }
+  })
+  test_list
+}
+
+global_opt_weight_predict <- function(training_array, realizations, test_set_matrix, overshoot=0.1, support_restriction=NULL) {
+  # Only works for data with quantiles at 5%, 50% and 90%
+  cdf_values <- c(0.05, 0.50, 0.95)
+  nr_experts = nrow(test_set_matrix)
+  training_list <- split_training_array_by_expert(training_array)
+  #training_assessments <- study_data_to_assessment_matrices(training_set, percentiles)
+  #realisations <- training_set |> dplyr::distinct(question_id, realization) |> arrange(question_id) |> pull(realization)
+  optimal_weights <- perfWeights_opt(training_list, realizations, cdf_values)
+
+  quantiles <- add_0_and_100_percentiles_matrix(test_set_matrix, overshoot=overshoot, support_restriction=support_restriction)
+  dists <- linear_distribution_interpolation_matrix(quantiles, c(0,cdf_values,1)) # E long
+  support <- range(quantiles)
+  # legacy code to get median
+  DM <- constructDM(
+    split_test_matrix_by_expert(test_set_matrix),
+    optimal_weights,
+    NULL,
+    support[1],
+    support[2],
+    cdf_values
+  )
+  median <- DM[1, 2] # single row, second entry is the median
+
+  DM_list <- (linear_combination_predict(dists, support, optimal_weights))
+  DM_list$median = median
+  DM_list
+}
+
+linear_combination_predict <- function(dists, support, weights=NULL) {
+  if (is.null(weights)) {
+    weights <- rep(1/length(dists), length(dists))
+  }
+
+  combined_mean = purrr::map2_dbl(dists, weights, \(dist, w) {
+    dist$mean * w
+  }) |> sum()
+
+  logDM <- function(q) {
+    pdf_vals <- purrr::map2(dists, weights, \(dist, w) {
+      dist$pdf(q) * w
+    }) |> do.call(what=cbind) # ends up with NxE matrix
+    return(log(matrixStats::rowSums2(pdf_vals)))
+  }
+
+  return(list(logDM=logDM, support=support, mean=combined_mean))
+
+}
+
+equal_weight_predict <- function(test_matrix, accumulated_probabilities = c(0.05,0.5,0.95), overshoot=0.1, support_restriction=NULL) {
+  checkmate::assert_matrix(test_matrix, "numeric")
+  nr_experts <- nrow(test_matrix)
+  quantiles <- add_0_and_100_percentiles_matrix(test_matrix, overshoot=overshoot, support_restriction=support_restriction)
+  dists <- linear_distribution_interpolation_matrix(quantiles, c(0,accumulated_probabilities,1)) # E long
+  support = range(quantiles)
+
+  DM_list <- linear_combination_predict(dists, support)
+  DM <- constructDM(
+    split_test_matrix_by_expert(test_matrix),
+    rep(1/nr_experts, nr_experts),
+    NULL,
+    support[1],
+    support[2],
+    accumulated_probabilities
+  )
+  median <- DM[1, 2] # single row, second entry is the median
+  DM_list$median = median
+  DM_list
+}
+
+equal_weight_predict_2 <- function(test_set) {
   nr_experts <- nrow(test_set)
   stopifnot(length(unique(test_set$expert_id)) == nr_experts)
 
@@ -1350,18 +1436,21 @@ study_test_performance <- function(study_data, sim_params = NULL) {
   for (i in seq(nrow(fold_combinations))) {
     test_set = fold_combinations$test[[i]]
     training_set = fold_combinations$training[[i]]
+    arr_format <- df_format_to_array_format(training_set, test_set, p$summarizing_function$f, p$k_percentiles)
+    test_matrix <- arr_format$test_summaries
+    training_array <- arr_format$training_summaries
+    training_realizations <- arr_format$training_realizations
 
     posterior = NA
     prediction = NA
     nr_experts <- total_nr_experts
     if (p$prediction_method == "copula") {
-      arr_format <- df_format_to_array_format(training_set, test_set, p$summarizing_function$f, p$k_percentiles)
       if (is(p$error_metric, "decoupler")) {
         res <- tryCatch( {
          fit_and_construct_posterior_indep(
-          arr_format$training_summaries,
-          arr_format$training_realizations,
-          arr_format$test_summaries,
+           training_array,
+           training_realizations,
+          test_matrix,
           p$error_metric,
           p$copula_model,
           vine_fit_settings = p$vine_fit_settings,
@@ -1385,7 +1474,7 @@ study_test_performance <- function(study_data, sim_params = NULL) {
         fit_and_construct_posterior(
           arr_format$training_summaries,
           arr_format$training_realizations,
-          arr_format$test_summaries,
+          test_matrix,
           p$copula_model,
           p$error_metric,
           vine_fit_settings = p$vine_fit_settings,
@@ -1425,10 +1514,13 @@ study_test_performance <- function(study_data, sim_params = NULL) {
     } else if (p$prediction_method == "median_average") {
       prediction <- median_average_predict(test_set)
     } else if (p$prediction_method == "equal_weights") {
-      prediction <- equal_weight_predict(test_set)
-    } else if (p$prediction_method == "global_opt") {
-      prediction <- global_opt_weight_predict(training_set, test_set)
-    } else {
+      posterior <- equal_weight_predict(test_matrix)
+    } else if (p$prediction_method == "classical_global_opt") {
+      posterior <- global_opt_weight_predict(training_array, training_realizations, test_matrix, p$overshoot, p$support_restriction)
+    } else if (p$prediction_method == "uniform") {
+      posterior <- uniform_prediction_posterior(test_matrix, p$overshoot, p$support_restriction)
+    }
+    else {
       stop(glue::glue("Unknown prediction method: {p$prediction_method}"))
     }
 

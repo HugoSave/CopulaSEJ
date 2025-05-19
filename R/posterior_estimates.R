@@ -10,15 +10,23 @@ performance_metrics_list <- function(mean=NA, median=NA, neg_log_lik=NA, post_ne
 }
 
 # compute simultaneous because they share the same samples
-posterior_performance_metrics <- function(log_unnormalized_posterior, support, true_value, num_samples=1000) {
-  samples <- sample_log_unnormalized_density(log_unnormalized_posterior, support, num_samples)
-  mean_value <- mean(samples)
-  median_value <- median(samples)
-  sd_value = sd(samples)
+posterior_performance_metrics <- function(log_unnormalized_posterior, support, true_value, num_samples=1000, mean_value=NULL, median_value=NULL) {
+  if (is.null(mean_value) || is.null(median_value)) {
+    samples <- sample_log_unnormalized_density(log_unnormalized_posterior, support, num_samples)
+    mean_value <- if(is.null(mean_value)) mean(samples) else mean_value
+    median_value <- if(is.null(median_value)) median(samples) else median_value
+    sd_value = sd(samples)
 
-  d <- density(samples)
-  likelihood <- approx(d$x, d$y, xout=true_value, method="linear", yleft =0, yright=0)$y
+    d <- density(samples)
+    likelihood <- approx(d$x, d$y, xout=true_value, method="linear", yleft =0, yright=0)$y
+    neg_log_like <- -log(likelihood)
+  } else {
+    sd_value = NA
+    neg_log_like <- NA
+  }
+
   post_neg_log_lik <- -log_unnormalized_posterior(true_value) # should be the same as looking at the samples but I don't think it is.
+
   #f <- approxfun(d$x, d$y, yleft=0, yright=0)
 
   # This is fancy but seems a bit less robust.
@@ -35,7 +43,6 @@ posterior_performance_metrics <- function(log_unnormalized_posterior, support, t
   #   }
   # )
 
-  neg_log_like <- -log(likelihood)
   return(performance_metrics_list( mean=mean_value, median=median_value, neg_log_lik=neg_log_like, post_neg_log_lik=post_neg_log_lik, sd=sd_value))
 }
 

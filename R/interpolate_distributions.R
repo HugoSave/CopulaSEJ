@@ -103,7 +103,18 @@ linear_distribution_interpolation <- function(x, cdf_values) {
 
   # Define the step function for the PDF
   pdf_function <- stepfun(x, c(0, pdf_values, 0)) # Start and end with 0 before the first and after the last interval
-  return(new_distribution(cdf_function, pdf_function, range(x), sample_fun, cdf_inv))
+  return(new_distribution(cdf=cdf_function, pdf=pdf_function, support=range(x),
+                          sample=sample_fun,
+                          cdf_inv=cdf_inv,
+                          mean=mean_of_linear_distribution(x, cdf_values),
+                          median=cdf_inv(0.5)))
+}
+
+mean_of_linear_distribution <- function(x, cdf_values) {
+  # mean of linear CDF
+  N = length(x)
+  x_lag_sum = x[1:(N-1)] + x[2:N]
+  sum(diff(cdf_values) * x_lag_sum)/2
 }
 
 linear_distribution_interpolation_matrix <- function(x_matrix, cdf_values) {

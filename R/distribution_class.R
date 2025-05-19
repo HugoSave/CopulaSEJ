@@ -15,11 +15,13 @@
 #' @returns A new distribution object with class distribution
 #' @export
 #'
-new_distribution <- function(cdf, pdf, support, sample=NULL, cdf_inv=NULL) {
+new_distribution <- function(cdf, pdf, support, sample=NULL, cdf_inv=NULL, mean=NULL, median=NULL) {
   stopifnot(is.function(cdf))
   stopifnot(is.function(pdf))
   stopifnot(is.numeric(support) && length(support) == 2)
   stopifnot(is.null(sample) || is.function(sample))
   stopifnot(is.null(cdf_inv) || is.function(cdf_inv))
-  return(structure(list(cdf=cdf, pdf=pdf, sample=sample, cdf_inv=cdf_inv, support=support), class = "distribution"))
+  stopifnot(is.null(mean) || is.numeric(mean))
+  stopifnot(is.null(median) || is.numeric(median))
+  return(structure(list(cdf=cdf, pdf=pdf, sample=sample, cdf_inv=cdf_inv, support=support, mean=mean, median=median), class = "distribution"))
 }
