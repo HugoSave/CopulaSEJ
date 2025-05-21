@@ -15,6 +15,9 @@ margin_comparisons$comb <- interaction(margin_comparisons$settings, margin_compa
 split_by_setting <- margin_comparisons |> split(margin_comparisons$comb) 
 settings_names <- split_by_setting |> map_chr(\(df) df$comb |> unique() |> as.character())
 
+margin_comparisons_CDF <- margin_comparisons |> filter(str_ends(comb, "CDF"))
+margin_comparisons_relative <- margin_comparisons |> filter(str_detect(comb, "Relative"))
+
 ```
 ```{r}
 
@@ -41,14 +44,25 @@ margin_comparisons |> ggplot(aes(x=cdf_values)) +
   geom_histogram(boundary=0, binwidth=0.05) +
   facet_wrap(vars(comb))
 
+margin_comparisons_CDF |> ggplot(aes(x=cdf_values)) +
+  geom_histogram(boundary=0, binwidth=0.05) +
+  facet_wrap(vars(comb))
+
 ```
 ```{r}
-margin_comp_p <- margin_comparisons |> ggplot(aes(x=cdf_values)) +
-  stat_ecdf() +
-  geom_abline(slope=1,intercept=0,linetype="dashed") + 
-  facet_wrap(vars(comb))
+plot_emperical_CDF_compaison <- function(df) {
+  ggplot(df, aes(x=cdf_values)) +
+    stat_ecdf() +
+    geom_abline(slope=1,intercept=0,linetype="dashed") + 
+    facet_wrap(vars(comb))
+}
+
+margin_comparisons_CDF |> plot_emperical_CDF_compaison()
+margin_comparisons_relative |> plot_emperical_CDF_compaison()
+margin_comp_p <- margin_comparisons |> plot_emperical_CDF_compaison()
 ggsave("output/marginal_comparisons.pdf", margin_comp_p, width=10, height=10)
-margin_comp
+margin_comp_p
+
 ```
 ```{r}
 ecdfs <- split_by_setting |> purrr::map(\(df) {

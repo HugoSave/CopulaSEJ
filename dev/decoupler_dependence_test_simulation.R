@@ -26,38 +26,38 @@ calculate_decoupler_values <- function(study_data, m_func, decoupler_f, k_percen
 
 metric_list <- list(
   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_CDF_decoupler()),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(compose_sigmoid = FALSE, short_name="Linear")),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(compose_sigmoid = FALSE, m_preprocess = "mean_E", short_name="Linear_MnE")),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(compose_sigmoid = FALSE, m_preprocess = "mean_G", short_name="Linear_MnG")),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(compose_sigmoid = FALSE, m_preprocess = "median", short_name="Linear_Md")),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(compose_sigmoid = FALSE, short_name="Relative")),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(compose_sigmoid = FALSE, m_preprocess = "mean_E", short_name="Relative_MnE")),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(compose_sigmoid = FALSE, m_preprocess = "mean_G", short_name="Relative_MnG")),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(compose_sigmoid = FALSE, m_preprocess = "median", short_name="Relative_Md")),
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(D_tilde = 3, compose_sigmoid = FALSE, short_name="Linear")),
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_E", short_name="Linear_MnE")),
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_G", short_name="Linear_MnG")),
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "median", short_name="Linear_Md")),
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(D_tilde = 3, compose_sigmoid = FALSE, short_name="Relative")),
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_E", short_name="Relative_MnE")),
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_G", short_name="Relative_MnG")),
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "median", short_name="Relative_Md")),
   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_support_ratio_decoupler(global_support = TRUE)),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(compose_sigmoid = FALSE, short_name="Ratio")),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(compose_sigmoid = FALSE, m_preprocess = "median", short_name="Ratio_Md")),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(compose_sigmoid = FALSE, m_preprocess = "mean_E", short_name="Ratio_MnE")),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(compose_sigmoid = FALSE, m_preprocess = "mean_G", short_name="Ratio_MnG"))
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(D_tilde = 3, compose_sigmoid = FALSE, short_name="Ratio")),
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "median", short_name="Ratio_Md")),
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_E", short_name="Ratio_MnE")),
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_G", short_name="Ratio_MnG"))
   # list(m=CopulaSEJ:::get_mean_summarizing_function(unified_support=TRUE), decoupler=CopulaSEJ:::get_sigmoid_linear_decoupler()),
   # list(m=CopulaSEJ:::get_mean_summarizing_function(unified_support=TRUE), decoupler=CopulaSEJ:::get_sigmoid_ratio_decoupler())
 )
 
-metric_list <- list(
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_CDF_decoupler()),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_linear_decoupler()),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_ratio_decoupler()),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_mean_linear_decoupler(global_support = TRUE)),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_mean_linear_decoupler(global_support=FALSE)),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_mean_ratio_decoupler(global_support = TRUE)),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_mean_ratio_decoupler(global_support = FALSE)),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_support_ratio_decoupler(global_support = TRUE)),
-  list(m=CopulaSEJ:::get_median_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_linear_decoupler()),
-  list(m=CopulaSEJ:::get_median_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_ratio_decoupler()),
-  list(m=CopulaSEJ:::get_median_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_relative_decoupler())
-  # list(m=CopulaSEJ:::get_mean_summarizing_function(unified_support=TRUE), decoupler=CopulaSEJ:::get_sigmoid_linear_decoupler()),
-  # list(m=CopulaSEJ:::get_mean_summarizing_function(unified_support=TRUE), decoupler=CopulaSEJ:::get_sigmoid_ratio_decoupler())
-)
+# metric_list <- list(
+#   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_CDF_decoupler()),
+#   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_linear_decoupler()),
+#   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_ratio_decoupler()),
+#   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_mean_linear_decoupler(global_support = TRUE)),
+#   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_mean_linear_decoupler(global_support=FALSE)),
+#   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_mean_ratio_decoupler(global_support = TRUE)),
+#   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_mean_ratio_decoupler(global_support = FALSE)),
+#   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_support_ratio_decoupler(global_support = TRUE)),
+#   list(m=CopulaSEJ:::get_median_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_linear_decoupler()),
+#   list(m=CopulaSEJ:::get_median_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_ratio_decoupler()),
+#   list(m=CopulaSEJ:::get_median_summarizing_function(), decoupler=CopulaSEJ:::get_sigmoid_relative_decoupler())
+#   # list(m=CopulaSEJ:::get_mean_summarizing_function(unified_support=TRUE), decoupler=CopulaSEJ:::get_sigmoid_linear_decoupler()),
+#   # list(m=CopulaSEJ:::get_mean_summarizing_function(unified_support=TRUE), decoupler=CopulaSEJ:::get_sigmoid_ratio_decoupler())
+# )
 
 run_decoupler_summarizer_dependence_analysis <- function(
   studies,
@@ -75,6 +75,7 @@ run_decoupler_summarizer_dependence_analysis <- function(
   study_results <- metric_study_combinations |> purrr::pmap(\(metrics, study) {
     # calculate decoupler values
     study_id <- study$study_id |> head(1)
+    realizations <- study$realization |> unique()
     nr_experts <- study$expert_id |> unique() |> length()
     nr_questions <- study$question_id |> unique() |> length()
     experts_rejected = NA
@@ -119,11 +120,17 @@ run_decoupler_summarizer_dependence_analysis <- function(
         nr_questions=nr_questions
       )
     } else {
-      dcorT_result <- CopulaSEJ:::fixed_dcorT_test(Z_flat, M_flat)
+      dcorT_test_M <- CopulaSEJ:::fixed_dcorT_test(Z_flat, M_flat)
+      dcorT_test_Q <- CopulaSEJ:::fixed_dcorT_test(Z_flat, realizations)
+      dcorT_test_both <- CopulaSEJ:::fixed_dcorT_test(Z_flat, c(realizations, M_flat))
       dcor_result = energy::dcor.test(Z_flat, M_flat, R=200)
-      list(dcor=dcor_result$estimates["dCor"],
-           dcorT=dcorT_result$estimate,
-           p_value_T=dcorT_result$p.value,
+      list(dcor_M=dcor_result$estimates["dCor"],
+           dcorT_M=dcorT_test_M$estimate,
+           dcorT_Q=dcorT_test_Q$estimate,
+           dcorT_both=dcorT_test_both$estimate,
+           p_value_M=dcorT_test_M$p.value,
+           p_value_Q=dcorT_test_Q$p.value,
+           p_value_both=dcorT_test_both$p.value,
            E=nr_experts,
            D=D,
            D_tilde=D_tilde,
@@ -131,7 +138,9 @@ run_decoupler_summarizer_dependence_analysis <- function(
            m=metrics$m$short_name,
            decoupler=metrics$decoupler$short_name,
            dcor_test=dcor_result,
-           dcor_T_test=dcorT_result,
+           dcor_T_test_M=dcorT_test_M,
+           dcorT_test_Q=dcorT_test_Q,
+           dcorT_test_both=dcorT_test_both,
            experts_rejected=experts_rejected,
            nr_experts_rejected=nr_experts_rejected,
            nr_questions=nr_questions

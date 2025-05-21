@@ -70,7 +70,6 @@ test_that("sigmoid_composed_affine_decoupler_ideal_mean_var small assessments ",
   U_star_Q = max(quantiles_extended)
   L_Z_vals <- sigmoid(decoupler$f(L_star_Q, quantiles), k=k)
 
-
   set.seed(1)
   dists <- linear_distribution_interpolation_matrix(quantiles_extended, c(0, 0.05, 0.5, 0.95, 1))
   samples <- dists |> purrr::map2(seq_along(dists), \(dist, e) {

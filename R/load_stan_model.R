@@ -4,9 +4,24 @@
 
 .stan_cache <- new.env(parent = emptyenv())
 
-load_stan_model <- function(load_precompiled = TRUE, precompiled_model_path = "beta_hiearchical.rds", save_compiled=TRUE, save_compiled_path = "beta_hiearchical.rds",
+load_stan_copula_model <- function(load_compiled = TRUE, precompiled_model_path = "copula_hiearchical.rds", save_compiled=TRUE, save_compiled_path = "copula_hiearchical.rds",
                            force_compilation=FALSE) {
-  model_name = "beta_hierarchical"
+  load_stan_model(load_precompiled=load_compiled, precompiled_model_path=precompiled_model_path,
+                  save_compiled=save_compiled, save_compiled_path=save_compiled_path,
+                  force_compilation=force_compilation, model_name="copula_hierarchical")
+
+}
+
+load_stan_beta_model <- function(load_compiled = TRUE, precompiled_model_path = "beta_hiearchical.rds", save_compiled=TRUE, save_compiled_path = "beta_hiearchical.rds",
+                           force_compilation=FALSE) {
+  load_stan_model(load_precompiled=load_compiled, precompiled_model_path=precompiled_model_path,
+                  save_compiled=save_compiled, save_compiled_path=save_compiled_path,
+                  force_compilation=force_compilation, model_name="beta_hierarchical")
+
+}
+
+load_stan_model <- function(load_precompiled = TRUE, precompiled_model_path = "beta_hiearchical.rds", save_compiled=TRUE, save_compiled_path = "beta_hiearchical.rds",
+                           force_compilation=FALSE, model_name="beta_hierarchical") {
   model_file_names <- paste0(model_name, ".stan")
   # Use cache if model already compiled
   if (!exists(model_name, envir = .stan_cache) || force_compilation) {

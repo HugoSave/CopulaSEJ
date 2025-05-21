@@ -53,21 +53,51 @@ bicopula_smoothing_limits <- function(family) {
   list(lower=lower, upper=upper)
 }
 
-calculate_adjacency_matrix <- function(error_matrix, method="kendall", threshold=0.7) {
+distance_correlation_p_value_adjacency_matrix <- function(decoupler_matrix) {
+  # We want to evaluate all pairs of columns in the decoupler matrix
+  # and calculate the distance correlation between them
+
+  # get all pairs of columns
+  N = nrow(decoupler_matrix)
+  D = ncol(decoupler_matrix)
+  adj_matrix = matrix(0, nrow=D, ncol=D)
+  for (i in seq_len(D)) {
+    # loop through triangle of the matrix
+    for (j in seq_len(D)) {
+      if (i <= j) { # skip when row is smaller or equal than column.
+        next
+      }
+      # calculate the distance correlation between the two columns
+      # and store it in the adjacency matrix
+      adj_matrix[i,j] <- energy::dcorT.test(decoupler_matrix[,i], decoupler_matrix[,j])$p.value
+      adj_matrix[j,i] <- adj_matrix[i,j]
+    }
+  }
+
+  adj_matrix
+}
+
+calculate_adjacency_matrix <- function(decoupler_matrix, method="kendall", threshold=0.7) {
   # we want to find groups of errors that are disjoint
   # determine the correlation between experts
   if (method == "kendall") {
-    cor_matrix <- copula::corKendall(error_matrix)
+    adj_matrix <- copula::corKendall(decoupler_matrix)
   } else if (method == "pearson") {
-    cor_matrix <- stats::cor(error_matrix, method="pearson")
-  } else {
+    adj_matrix <- stats::cor(decoupler_matrix, method="pearson")
+  } else if (method == "distance_correlation") {
+    adj_matrix <- distance_correlation_p_value_adjacency_matrix(decoupler_matrix)
+    # we want to build edges between dependent experts. That is, experts that are not independent and thus have a low p value
+    # Thus we invert the p value
+    adj_matrix <- 1 - adj_matrix
+  }
+  else {
     stop(paste("Unknown method", method))
   }
-  adjacency_matrix <- cor_matrix
+  adjacency_matrix <- adj_matrix
   diag(adjacency_matrix) <- 0
   # set values with abs value less than threshold to 0 and other to 1
-  adjacency_matrix[abs(cor_matrix) < threshold] <- 0
-  adjacency_matrix[abs(cor_matrix) >= threshold] <- 1
+  adjacency_matrix[abs(adj_matrix) < threshold] <- 0
+  adjacency_matrix[abs(adj_matrix) >= threshold] <- 1
   adjacency_matrix
 }
 
@@ -80,12 +110,47 @@ partition_errors_disjoint <- function(cdf_matrix, method="kendall", threshold=0.
   igraph::components(graph)
 }
 
-partition_and_fit_copulas <- function(cdf_matrix, copula_model, threshold, fit_settings) {
-  partionings <- partition_errors_disjoint(cdf_matrix, threshold)
+combine_singletons <- function(partition) {
+  # Original membership vector
+  # Original membership vector
+  membership <- partition$membership
+
+  # Compute sizes
+  group_sizes <- table(membership)
+
+  # Identify which groups are singletons
+  singleton_groups <- as.numeric(names(group_sizes[group_sizes == 1]))
+
+  # Create a new membership vector
+  # All singleton groups are mapped to a temporary group ID (e.g. 999)
+  temp_membership <- membership
+  temp_membership[membership %in% singleton_groups] <- -1
+
+  # Now remap group IDs to consecutive integers starting from 1
+  # unique groups, in order of appearance
+  #new_ids <- match(temp_membership, unique(temp_membership))
+
+  # Compute updated partition structure
+  new_partition <- list(
+    membership = temp_membership, #, new_ids,
+    csize = as.vector(table(temp_membership)),
+    no = length(unique(temp_membership))
+  )
+
+  new_partition
+}
+
+partition_and_fit_copulas <- function(cdf_matrix, copula_model, threshold, fit_settings, method="kendall") {
+  partionings <- partition_errors_disjoint(cdf_matrix, method=method, threshold=threshold)
+  partionings <- combine_singletons(partionings)
   groups <- igraph::groups(partionings)
-  copulas <- igraph::groups(partionings) |> purrr::map(\(group) {
+  copulas <- purrr::map2(groups, names(groups), \(group, name) {
     group_obs <- cdf_matrix[,group,drop=FALSE]
-    rlang::inject(fit_copula(group_obs, copula_model, !!!fit_settings))
+    if (name=="-1") {
+      fit_copula(group_obs, "indep")
+    } else {
+      rlang::inject(fit_copula(group_obs, copula_model, !!!fit_settings))
+    }
   })
 
   density <- function(u_mat, log=FALSE) { # u_mat is a vec that is dE long or a nx(d*E) matrix
@@ -94,7 +159,7 @@ partition_and_fit_copulas <- function(cdf_matrix, copula_model, threshold, fit_s
     }
     stopifnot(is.matrix(u_mat))
     # use membership info to know what copula to feed what subsections of the u vec
-    densities <- purrr::imap(groups, \(group, i) {
+    densities <- purrr::map2(groups, seq_len(length(groups)), \(group, i) {
       u_subset <- u_mat[,group, drop=FALSE]
       copulas[[i]]$density(u_subset, log=log)
     }) # list of length nr of groups. Each element is a vector of same length as number of rows or u_mat
@@ -151,12 +216,48 @@ wrap_copula <- function(copula) {
   }
 }
 
+fit_hiarchical_copula <- function(pseudo_obs, eta=1) {
+  # fit a hierarchical copula
+  normal_space <- qnorm(pseudo_obs) # stan model expects this transformation already to be made
+  N = nrow(pseudo_obs)
+  D = ncol(pseudo_obs)
+
+  data_list <- list(
+    N = N,
+    D = D,
+    eta = eta,
+    normal_latent=normal_space
+  )
+
+  # load copula_hiarch_model.stan
+  mod <- load_stan_copula_model()
+  fit_map <- rstan::optimizing(
+    mod,
+    data = data_list, verbose = TRUE
+  )
+  if (fit_map$return_code != 0) {
+    stop(paste0("Stan model did not converge. Please check the model and the data. Warning code is: ", fit_map$return_code))
+  }
+  # extract the parameters with names Sigma[i,j]
+  nr_params = D*D*2
+  # L and Sigma are returned and the first half of the parameters are the L values
+  sigma_values <- fit_map$par[(nr_params/2+1):nr_params]
+  sigma_matrix <- matrix(sigma_values, nrow = D, ncol = D)
+
+  fitted_norm_cop <- copula::normalCopula(copula::P2p(sigma_matrix), dim = D, dispstr="un")
+
+  wrapped_copula <- wrap_copula(fitted_norm_cop)
+  wrapped_copula$eta <- eta
+  wrapped_copula$method <- "hierarchical"
+  wrapped_copula
+}
+
 # pseudo_obse rror_obs is nx(d*E) matrix (n questions, d * E errors)
 fit_copula <- function(pseudo_obs, copula_model = "joe",
                        family_set = c("gaussian","indep"),
                        selcrit="mbicv", psi0=0.5,
                        copula_fit_method="itau",
-                       threshold=0.5) {
+                       threshold=0.5, eta=1) {
   if (ncol(pseudo_obs) == 1) {
     indep1DCopula = copula::indepCopula(dim=1)
 
@@ -164,6 +265,11 @@ fit_copula <- function(pseudo_obs, copula_model = "joe",
   }
   if (copula_model == "indep") {
     return(wrap_copula(copula::indepCopula(dim = ncol(pseudo_obs))))
+  }
+
+  if (copula_model == "hierarchical") {
+    # fit a hierarchical copula
+    return(fit_hiarchical_copula(pseudo_obs, eta=eta))
   }
 
   res <- checkmate::check_number(nrow(pseudo_obs), lower=10)
@@ -460,12 +566,6 @@ get_error_margins_min_max <- function(flattened_errors) {
   })
 }
 
-load_stan_model_beta_hiarch <- function() {
-  # load the stan model
-  stan_model <- system.file("stan", "beta_hierarchical_model.stan", package = "CopulaSEJ")
-  stan_model
-}
-
 mean_variance_to_beta_params <- function(mean, variance, L, U, epsilon=1e-6) {
   stopifnot(variance < 0.25) # variance must be less than 0.25 to be a beta distribution
   # mean = alpha / (alpha + beta)
@@ -539,7 +639,7 @@ estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_va
   }
   #zero_to_one_obs <- (obs_vec - support[1])/support_width
 
-  model <- load_stan_model()
+  model <- load_stan_beta_model()
   N = length(obs_vec)
   data_list <- list(
     N = N,
@@ -929,7 +1029,8 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
                                            rejection_threshold=NULL,
                                            rejection_min_experts=3,
                                            rejection_test="distance_correlation",
-                                           connection_threshold=NULL) {
+                                           connection_threshold=NULL,
+                                           connection_metric="distance_correlation") {
   checkmate::assert_array(training_estimates, "numeric", d=3)
   checkmate::assert_numeric(training_realizations)
   checkmate::assert_matrix(test_matrix, "numeric")

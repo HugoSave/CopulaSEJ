@@ -12,6 +12,19 @@ test_that("estimate_margins returns correct objects", {
   }
 })
 
+test_that("distance_correlation_p_value_adjacency_matrix works", {
+  E=4
+  decoupler_matrix <- matrix(rnorm(10*4), nrow=10, ncol=E)
+  p_values <- distance_correlation_p_value_adjacency_matrix(decoupler_matrix)
+  expect_type(p_values, "double")
+  expect_equal(dim(p_values), c(E,E))
+  expect_equal(diag(p_values), rep(0, E)) # low p value means reject indepdendece. Perfecet dependence with one self is thus p=0
+
+  expect_true(all(p_values >= 0) && all(p_values <= 1))
+  # check that lower triangular matrix is equal to upper triangular matrix
+  expect_equal(p_values[lower.tri(p_values)], t(p_values)[lower.tri(p_values)])
+})
+
 test_that("estimate_margins fulfill basic probability properties", {
   error_obs <- matrix(c(0.3313687,-28.6216216,1.2500000,1.2500000,1.3265306,0.9876100,1.0080645,0.8939394,0.7341772), nrow=9, ncol=1)
   margin_dist <- estimate_margins(error_obs)[[1]]

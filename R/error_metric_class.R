@@ -1053,8 +1053,8 @@ compose_decoupler_m_preprocessing <- function(process_m, decoupler, name, short_
 
 
 get_support_ratio_decoupler <- function(global_support=TRUE, quantile_probs=c(0.05,0.5,0.95), overshoot=0.1, support_restriction=NULL) {
-  linear_decoupler <- get_linear_decoupler()
-  ratio_decoupler <- get_ratio_decoupler()
+  linear_decoupler <- get_linear_decoupler(D_tilde=1)
+  ratio_decoupler <- get_ratio_decoupler(D_tilde=1)
 
   get_supports_and_means <- function(m) {
     m <- typecheck_and_convert_matrix_vector(m, vector())

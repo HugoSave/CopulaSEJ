@@ -100,7 +100,6 @@ filter_studies_support_magnitude_diff <- function(study_list, assessment_cols, m
   filter_questions_general(study_list, filter_fun)
 }
 
-
 filter_studies_support_diff <- function(study_list, assessment_cols, max_abs_diff=10000) {
   filter_fun <- \(question_df) {
     assessments <- question_df |> dplyr::select(dplyr::all_of(assessment_cols))

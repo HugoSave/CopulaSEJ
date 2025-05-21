@@ -29,11 +29,12 @@ res <- fit_and_construct_posterior_indep(
         training_set |> study_df_to_realizations(),
         test_m_matrix,
         cdf_metric,
-        "vine",
-        vine_fit_settings = list(),
+        "hierarchical",
+        vine_fit_settings = list(eta=1),
         error_estimation_settings = list(out_of_boundary="clamp", method="beta_MAP", bw=1),
         q_support_restriction = NULL,
-        connection_threshold =  0.8
+        connection_threshold =  NULL,
+        connection_metric="kendall"
       )
 ```
 

@@ -1,4 +1,3 @@
-install.packages("rstan")
 library(rstan)
 options(mc.cores = parallel::detectCores()-2)
 rstan_options(auto_write = TRUE)
@@ -23,7 +22,7 @@ data_list <- list(
   beta_b = beta_b
 )
 
-mod <- CopulaSEJ:::load_stan_model()
+mod <- CopulaSEJ:::load_stan_beta_model()
 
 fit_map <- rstan::optimizing(
   mod,
