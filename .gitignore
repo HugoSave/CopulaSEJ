@@ -7,3 +7,4 @@
 
 # stan models are not compatible across different computers
 beta_hiearchical.rds
+copula_hiearchical.rds

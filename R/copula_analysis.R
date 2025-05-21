@@ -233,7 +233,7 @@ fit_hiarchical_copula <- function(pseudo_obs, eta=1) {
   mod <- load_stan_copula_model()
   fit_map <- rstan::optimizing(
     mod,
-    data = data_list, verbose = TRUE
+    data = data_list#, verbose = TRUE
   )
   if (fit_map$return_code != 0) {
     stop(paste0("Stan model did not converge. Please check the model and the data. Warning code is: ", fit_map$return_code))

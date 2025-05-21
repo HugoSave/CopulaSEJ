@@ -28,12 +28,30 @@ evalute_copula_fit <- function(study_data,
       get_three_quantiles_summarizing_function()$f,
       k_percentiles
     )
-    post_obj <- get_posterior_obj(
-      arr_format$training_summaries,
-      arr_format$training_realizations,
-      arr_format$test_summaries,
-      decoupler
+
+    post_obj <- tryCatch(
+      get_posterior_obj(
+        arr_format$training_summaries,
+        arr_format$training_realizations,
+        arr_format$test_summaries,
+        decoupler
+      ),
+      error = function(e) {
+        if (grepl("Stan model did not converge", e$message)) {
+          return(NULL)
+        } else {
+          stop(e)  # re-throw the error if it's a different one
+        }
+      }
     )
+    if (is.null(post_obj)) {
+      return(tibble::tibble_row(
+          likelihood = NA,
+          cum_prob = NA,
+          test_question_id = test_set$question_id |> unique(),
+        )
+      )
+    }
     copula <- post_obj$decoupler_copula
     decoupler_margins <- post_obj$decoupler_margins
     stopifnot((test_set$question_id |> unique() |> length()) == 1)
@@ -138,18 +156,18 @@ get_copula_estimation_settings <- function() {
         eta=1
       )
     ),
-    #list(
-    #  copula_model = "hierarchical",
-    #  vine_fit_settings = list(
-    #    eta=10
-    #  )
-    #),
-    #list(
-    #  copula_model = "hierarchical",
-    #  vine_fit_settings = list(
-    #    eta=100
-    #  )
-    #),
+    list(
+      copula_model = "hierarchical",
+      vine_fit_settings = list(
+        eta=10
+      )
+    ),
+    list(
+      copula_model = "hierarchical",
+      vine_fit_settings = list(
+        eta=100
+      )
+    ),
     list(
       copula_model = "frank",
       vine_fit_settings = list(),

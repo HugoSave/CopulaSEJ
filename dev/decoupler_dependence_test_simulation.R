@@ -75,9 +75,9 @@ run_decoupler_summarizer_dependence_analysis <- function(
   study_results <- metric_study_combinations |> purrr::pmap(\(metrics, study) {
     # calculate decoupler values
     study_id <- study$study_id |> head(1)
-    realizations <- study$realization |> unique()
     nr_experts <- study$expert_id |> unique() |> length()
     nr_questions <- study$question_id |> unique() |> length()
+    realizations <- matrix(study_df_to_realizations(study), nrow=nr_questions, ncol=1)
     experts_rejected = NA
     nr_experts_rejected = NA
     accepted_experts = seq_len(nr_experts)
@@ -122,15 +122,12 @@ run_decoupler_summarizer_dependence_analysis <- function(
     } else {
       dcorT_test_M <- CopulaSEJ:::fixed_dcorT_test(Z_flat, M_flat)
       dcorT_test_Q <- CopulaSEJ:::fixed_dcorT_test(Z_flat, realizations)
-      dcorT_test_both <- CopulaSEJ:::fixed_dcorT_test(Z_flat, c(realizations, M_flat))
       dcor_result = energy::dcor.test(Z_flat, M_flat, R=200)
       list(dcor_M=dcor_result$estimates["dCor"],
            dcorT_M=dcorT_test_M$estimate,
            dcorT_Q=dcorT_test_Q$estimate,
-           dcorT_both=dcorT_test_both$estimate,
            p_value_M=dcorT_test_M$p.value,
            p_value_Q=dcorT_test_Q$p.value,
-           p_value_both=dcorT_test_both$p.value,
            E=nr_experts,
            D=D,
            D_tilde=D_tilde,
@@ -140,13 +137,12 @@ run_decoupler_summarizer_dependence_analysis <- function(
            dcor_test=dcor_result,
            dcor_T_test_M=dcorT_test_M,
            dcorT_test_Q=dcorT_test_Q,
-           dcorT_test_both=dcorT_test_both,
            experts_rejected=experts_rejected,
            nr_experts_rejected=nr_experts_rejected,
            nr_questions=nr_questions
       )
     }
-  }) |> purrr::list_transpose()
+  }, .progress = TRUE) |> purrr::list_transpose()
 
   df_results <- tibble(!!!study_results)
 
