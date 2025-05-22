@@ -69,23 +69,23 @@ p_values_test <- function(estimates, realizations, test="kruskal", decoupler=NUL
   else if (test == "distance_correlation") {
     checkmate::assert_class(decoupler, "decoupler")
     decoupled_vals <- assessments_to_decoupler_observations(estimates, realizations, decoupler$f)
-    return(p_values_distance_correlation(estimates, decoupled_vals))
+    return(p_values_distance_correlation(realizations, decoupled_vals))
   }
   else {
     stop("Unknown test.")
   }
 }
 
-
 # Tests the assumption that M and Z are independent
-run_distance_correlation_tests  <- function(training_summaries, decoupled_values) {
-  # training_summaries (QxExD array)
+run_distance_correlation_tests  <- function(realizations, decoupled_values) {
+  # realizations (Q vector)
   # decoupled_values (QxExtilde{D} array)
-  # for each expert we have a QxD and a Qx\tilde{D} matrix
-  training_summaries_per_E <- purrr::array_branch(training_summaries, c(2))
+  # for each expert we have a Qx\tilde{D} matrix
   decoupled_values_per_E <- purrr::array_branch(decoupled_values, c(2))
+  # Send a column vector
+  realizations_matrix <- matrix(realizations, ncol=1)
 
-  purrr::map2(training_summaries_per_E, decoupled_values_per_E, fixed_dcorT_test)
+  purrr::map(decoupled_values_per_E, \(expert_Z) fixed_dcorT_test(realizations_matrix, expert_Z))
 }
 
 fixed_dcorT_test <- function(x, y) {
@@ -122,8 +122,8 @@ fixed_dcorT_test <- function(x, y) {
 }
 
 # Tests the assumption that M and Z are independent
-p_values_distance_correlation  <- function(training_summaries, decoupled_values) {
-  run_distance_correlation_tests(training_summaries, decoupled_values) |>
+p_values_distance_correlation  <- function(realizations, decoupled_values) {
+  run_distance_correlation_tests(realizations, decoupled_values) |>
     purrr::map_dbl(\(test_result) {
       test_result$p.value
     })

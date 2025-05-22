@@ -164,7 +164,7 @@ decoupler_test_output_file_name <- function(
 
 # run if not interactive
 if (!interactive()) {
-  reject_experts = FALSE
+  reject_experts = TRUE
   rejection_threshold = 0.05
   rejection_test = "distance_correlation"
   rej_expert_str <- ifelse(reject_experts, paste0("RejE(", rejection_threshold, ")"), "noR")

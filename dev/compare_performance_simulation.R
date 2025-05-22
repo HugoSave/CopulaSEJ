@@ -173,7 +173,7 @@ sample_and_add_metrics <- function(analys_res) {
     if (!is.list(post)) {
       return(performance_metrics_list()) # defaults to NA for all other metrics
     } else {
-      return(posterior_performance_metrics(post$logDM, post$support, realization, num_samples=1000, mean_value=post$mean, median_value=post$median))
+      return(posterior_performance_metrics(post$logDM, post$support, realization, num_samples=5000, mean_value=post$mean, median_value=post$median))
     }
   })
 
@@ -311,6 +311,45 @@ run_performance_test <- function() {
                              connection_metric = "kendall"
                            ))
 
+   param_list <- push_list(param_list,
+                           default_simulation_params(
+                             prediction_method = "copula",
+                             copula_model = "indep",
+                             summarizing_function = get_three_quantiles_summarizing_function(),
+                             q_support_restriction = NULL,
+                             q_support_overshoot = 0.1,
+                             rejection_threshold = 0.05,
+                             rejection_min_experts = 1,
+                             rejection_test = "distance_correlation",
+                             error_estimation_settings = list(
+                               method = "beta_MAP",
+                               prior_var=100
+                             ),
+                             vine_fit_settings = list(
+                               eta=10,
+                               recover_numerical_failure = TRUE
+                             )
+                           ))
+   param_list <- push_list(param_list,
+                           default_simulation_params(
+                             prediction_method = "copula",
+                             copula_model = "indep",
+                             summarizing_function = get_three_quantiles_summarizing_function(),
+                             q_support_restriction = NULL,
+                             q_support_overshoot = 0.1,
+                             rejection_threshold = NULL,
+                             rejection_min_experts = 1,
+                             rejection_test = "distance_correlation",
+                             error_estimation_settings = list(
+                               method = "beta_MAP",
+                               prior_var=100
+                             ),
+                             vine_fit_settings = list(
+                               eta=10,
+                               recover_numerical_failure = TRUE
+                             )
+                           ))
+
 
   result_list <- purrr::map(param_list, \(x) {
     analys_res <- run_study_find_posterior(data_list_short, x, "main")
@@ -325,15 +364,15 @@ run_performance_test <- function() {
 
   res_combined <- result_list |> combine_simulation_results()
 
-  saveRDS(res_combined, "dev/output/compare_performance_simulation.rds")
+  file_name = "dev/output/compare_performance_simulation.rds"
+  saveRDS(res_combined, file_name)
 
-  print("Results saved to dev/output/compare_errors_and_summarizers_simulation.rds")
-
+  print(glue::glue("Results saved to {file_name}"))
 
 }
 
 if (!interactive()) {
-  run_benchmarking_methods()
+  #run_benchmarking_methods()
 }
 
 if (!interactive()) {

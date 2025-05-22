@@ -14,9 +14,9 @@ test_that("reject_experts returns valid structure for classical_calibration", {
   expect_true(is.numeric(result$accepted_experts))
 })
 
-test_that("reject_experts uses Kruskal test correctly", {
+test_that("reject_experts uses distance_correlation test correctly", {
   result <- reject_experts(mock_training_estimates[,,2,drop=FALSE], mock_realizations,
-                           rejection_level = 0.2, test = "kruskal", decoupler = get_linear_decoupler())
+                           rejection_level = 0.2, test = "distance_correlation", decoupler = get_linear_decoupler(D_tilde = 3))
 
   expect_type(result$p_values, "double")
   expect_true(all(result$p_values >= 0 & result$p_values <= 1))

@@ -29,29 +29,18 @@ modified_studies <- list_mod[[2]]
 ```
 
 ```{r}
-data_list_short <- studies_no_m_zero[1:3]
-params <- default_simulation_params(copula_model = "joe", prediction_method = "copula_calibration")
-params <- default_simulation_params(copula_model = "frank", prediction_method = "copula")
-params <- default_simulation_params(copula_model = "frank", prediction_method = "equal_weights")
-params <- default_simulation_params(copula_model = "frank", prediction_method = "global_opt")
-analysis_res <- run_analysis_per_study(data_list_short, params)
-
-prediction_methods = c("copula_calibration", "copula_error_density", "equal_weights", "global_opt")
-params <- default_simulation_params(copula_model = "joe", prediction_method = "perfect_expert")
-
-# loop through studies in data_list_form
-for (prediction_method in prediction_methods) {
-  params <- default_simulation_params(copula_model = "joe", prediction_method = prediction_method)
-  sim_res <- run_analysis_per_study(data_list_short, params)
-  sim_res$results["prediction_method"] <- prediction_method
-  results <- append(results, list(sim_res$results))
-  warnings <- append(warnings, list(sim_res$warnings))
-}
-results_df <- dplyr::bind_rows(results)
 
 #saveRDS(results_df, "dev/output/performance_comparison_new.rds")
 #results_df<-readRDS("output/performance_comparison_new.rds")
-results_df<-readRDS("output/compare_errors_and_summarizers_simulation.rds")$results
+results_df<-readRDS("output/compare_performance_simulation.rds")$results
+results_df <- results_df |> filter(prediction_method == "CohierarchicalCDF3QNoRCT(0.7)")
+benchmark_df<-readRDS("output/benchmarking_methods_performance.rds")$results
+benchmark_df <- benchmark_df |> filter(study_id !=7) # remove study_id 7, not in the normal performance 
+
+stopifnot(nrow(results_df)/length(unique(results_df$prediction_method)) == nrow(benchmark_df)/length(unique(benchmark_df$prediction_method)))
+
+results_df <- rbind(results_df, benchmark_df)
+nr_prediction_methods = length(unique(results_df$prediction_method))
 #results_df <- readRDS("output/performance_comparison.rds")
 
 #results_df <- results_df |> mutate(prediction_method = if_else(str_starts(prediction_method, "DP"), "product", prediction_method))
@@ -112,7 +101,6 @@ abs_values
 # Look at relative error
 ```{r}
 # count number of infinite rel_error
-nr_prediction_methods = length(unique(results_df$prediction_method))
 nr_0_realizations <- results_df |> filter(rel_error == Inf) |> nrow() / nr_prediction_methods
 # should yield the same
 nr_0_realizations_other <- results_df |> filter(realization == 0)  |> nrow() / nr_prediction_methods
@@ -172,17 +160,35 @@ results_df |> filter(realization!=0 & !is.na(rel_error)) |> group_by(prediction_
 ```{r}
 results_df |> filter(realization!=0 & abs(rel_error) < 100 &  !is.na(rel_error)) |> group_by(prediction_method) |>  summarise(MAPE = mean(abs(rel_error)),MedAPE = median(abs(rel_error)), RMSPE = sqrt(mean(rel_error^2)), MAXPE = max(abs(rel_error)), MedNLL=median(neg_log_lik))
 ```
+```{r}
+results_df |> mutate(MAPE=abs(rel_error)) |> filter(realization!=0 & abs(rel_error) < 10 & !is.na(MAPE)) |> group_by(prediction_method) |>  summarise(MAPE = mean(MAPE),MedAPE = median(MAPE), RMSPE = sqrt(mean(MAPE^2)), MAXPE = max(MAPE), MedNLL=median(neg_log_lik))
+```
+
+
+```{r}
+best_prediction_method_per_test <- results_df  |> group_by(study_id, test_question) |> 
+  summarise(best_rel_error = min(abs(rel_error)), .groups="drop")
+
+# join best_prediction_method_per_test and results_df
+result_with_best <- results_df |> left_join(best_prediction_method_per_test, by=c("study_id", "test_question"))
+
+times_equal_to_best_rel_error <- result_with_best |> rowwise() |>
+  mutate(equal_to_best_rel_error = if_else(abs(rel_error) == best_rel_error, T, F)) |>
+  group_by(prediction_method) |> summarise(n_equal_to_best_rel_error = sum(equal_to_best_rel_error), 
+                                           ratio_best=n_equal_to_best_rel_error/nr_tests, .groups="drop") 
+  
+```
 
 
 ```{r}
 nr_studies <- length(unique(results_df$study_id))
-# Look at per study, which prediction method performed the best?
-error_metrics_per_study <- results_df |> filter(realization!=0 & abs(rel_error) < 10) |> group_by(study_id, prediction_method) |> 
+# Look at per study and test question, which prediction method performed the best?
+error_metrics_per_test <- results_df |> filter(realization!=0 & abs(rel_error) < 10) |> group_by(study_id, test_question, prediction_method) |> 
   summarise(MAPE = mean(abs(rel_error)), MedAPE = median(abs(rel_error)), RMSPE = mean(rel_error^2), MAXPE = max(abs(rel_error)), .groups="drop")
 
 # check the number of times each prediction method performed the best
 best_prediction_method_per_study <- error_metrics_per_study |> 
-  group_by(study_id) |> 
+  group_by(study_id, test_question) |> 
   summarise(MAPE = prediction_method[which.min(MAPE)], 
             MedAPE = prediction_method[which.min(MedAPE)],
             RMSPE= prediction_method[which.min(RMSPE)],
@@ -194,8 +200,8 @@ prediction_types <- prediction_types |> purrr::lmap(\(type_l) {l <- list(); l[[t
 proportion_table <- tibble(error_metric = error_metrics, !!!prediction_types)
 
 proportion_table_ <- best_prediction_method_per_study |> 
-  pivot_longer(-study_id, names_to="error_metric", values_to = "prediction_method") |>
-  group_by(error_metric, prediction_method) |> summarise(n=n()/nr_studies, .groups="drop")  |>
+  pivot_longer(-c(study_id, test_question), names_to="error_metric", values_to = "prediction_method") |>
+  group_by(error_metric, prediction_method) |> summarise(n=n()/nr_tests, .groups="drop")  |>
   pivot_wider(names_from = prediction_method, values_from = n) 
 proportion_table <- dplyr::rows_update(proportion_table, proportion_table_)
 # replace na with 0
