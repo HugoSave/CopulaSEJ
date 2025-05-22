@@ -201,7 +201,7 @@ run_benchmarking_methods <- function() {
   numerical_col_names <- c(k_percentiles_to_colname(c(5, 50, 95)), "realization")
   studies <- load_data_49(relative_dev_folder = FALSE)
   #studies <- filter_studies_few_questions(studies, min_questions=11)
-  #studies <- filter_study_remove_ids(studies, study_ids=7)
+  studies <- filter_study_remove_ids(studies, study_ids=7)
 
   data_list_short <-studies[1]
   param_list <- list()
@@ -209,7 +209,7 @@ run_benchmarking_methods <- function() {
   param_list <- push_list(param_list,
                           default_simulation_params(
                             prediction_method = "density_product",
-                            overshoot=0.1,
+                            q_support_overshoot=0.1,
                             summarizing_function = get_three_quantiles_summarizing_function(),
                             q_support_restriction = NULL,
                           ))
@@ -237,10 +237,10 @@ run_benchmarking_methods <- function() {
                           ))
 
   result_list <- purrr::map(param_list, \(x) {
-    analys_res <- run_study_find_posterior(data_list_short, x, "RejTest")
+    analys_res <- run_study_find_posterior(data_list_short, x, "benchmark")
     results_with_metrics <- sample_and_add_metrics(analys_res)
     results_with_metrics$posterior <- NULL
-    file_name <- create_file_name(x, "RejTest")
+    file_name <- create_file_name(x, "benchmark")
     print(glue::glue("Saving results to {file_name}"))
     saveRDS(results_with_metrics, file_name)
     analys_res$results <- results_with_metrics
@@ -254,11 +254,7 @@ run_benchmarking_methods <- function() {
   print("Results saved to dev/output/benchmarking_methods_performance.rds")
 }
 
-if (!interactive()) {
-  run_benchmarking_methods()
-}
-
-if (!interactive()) {
+run_performance_test <- function() {
   library(devtools)
   load_all(".")
   source("dev/dev_utils.R")
@@ -266,49 +262,81 @@ if (!interactive()) {
   file_name <- "dev/output/data49_nov24.rds"
   numerical_col_names <- c(k_percentiles_to_colname(c(5, 50, 95)), "realization")
   studies <- load_data_49(relative_dev_folder = FALSE)
-  #studies <- filter_questions_in_studies_non_negative(studies)
-  #studies <- filter_studies_support_magnitude_diff(studies, numerical_col_names, max_mag_diff = 10000)
-  #studies <- filter_studies_support_diff(studies, numerical_col_names, max_abs_diff = 10000)
-  studies <- filter_studies_few_questions(studies, min_questions=11)
   studies <- filter_study_remove_ids(studies, study_ids=7)
-  #list_mod <- change_value_in_study_list(studies, numerical_col_names, 0.001, 0.0015)$study_list
-  #list_mod <- change_small_value_in_study_list(list_mod, numerical_col_names, 0.001)$study_list
-  # list_mod <- change_value_in_study_list(list_mod, numerical_col_names, 0, 0.001)$study_list
-  #list_mod <- filter_studies_support_magnitude_diff(list_mod, numerical_col_names, max_mag_diff = 1000)
 
-  data_list_short <-studies[1]
+  data_list_short <-studies
   param_list <- list()
 
-  param_list <- push_list(param_list,
-                          default_simulation_params(
-                            prediction_method = "density_product",
-                            overshoot=0.1,
-                            summarizing_function = get_three_quantiles_summarizing_function(),
-                            q_support_restriction = NULL,
-                          ))
 
-  param_list <- push_list(param_list,
-            default_simulation_params(
-              prediction_method = "median_average",
-              summarizing_function = get_three_quantiles_summarizing_function(),
-            ))
-
-  param_list <- push_list(param_list,
-                          default_simulation_params(
-                            prediction_method = "equal_weights"
-                          ))
-
-  param_list <- push_list(param_list,
-                          default_simulation_params(
-                            prediction_method = "classical_global_opt"
-                          ))
+   param_list <- push_list(param_list,
+                           default_simulation_params(
+                             prediction_method = "copula",
+                             copula_model = "hierarchical",
+                             summarizing_function = get_three_quantiles_summarizing_function(),
+                             q_support_restriction = NULL,
+                             q_support_overshoot = 0.1,
+                             rejection_threshold = NULL,
+                             error_estimation_settings = list(
+                               method = "beta_MAP",
+                               prior_var=100
+                             ),
+                             vine_fit_settings = list(
+                               eta=10,
+                               recover_numerical_failure = TRUE
+                             ),
+                             connection_threshold = 0.7,
+                             connection_metric = "kendall"
+                           ))
 
 
-  param_list <- push_list(param_list,
-                          default_simulation_params(
-                            prediction_method = "uniform"
-                          ))
+   param_list <- push_list(param_list,
+                           default_simulation_params(
+                             prediction_method = "copula",
+                             copula_model = "hierarchical",
+                             summarizing_function = get_three_quantiles_summarizing_function(),
+                             q_support_restriction = NULL,
+                             q_support_overshoot = 0.1,
+                             rejection_threshold = 0.05,
+                             rejection_min_experts = 1,
+                             rejection_test = "distance_correlation",
+                             error_estimation_settings = list(
+                               method = "beta_MAP",
+                               prior_var=100
+                             ),
+                             vine_fit_settings = list(
+                               eta=10,
+                               recover_numerical_failure = TRUE
+                             ),
+                             connection_threshold = 0.7,
+                             connection_metric = "kendall"
+                           ))
 
+
+  result_list <- purrr::map(param_list, \(x) {
+    analys_res <- run_study_find_posterior(data_list_short, x, "main")
+    results_with_metrics <- sample_and_add_metrics(analys_res)
+    results_with_metrics$posterior <- NULL
+    file_name <- create_file_name(x, "main")
+    print(glue::glue("Saving results to {file_name}"))
+    saveRDS(results_with_metrics, file_name)
+    analys_res$results <- results_with_metrics
+    analys_res
+  }, .progress="Parameter choice")
+
+  res_combined <- result_list |> combine_simulation_results()
+
+  saveRDS(res_combined, "dev/output/compare_performance_simulation.rds")
+
+  print("Results saved to dev/output/compare_errors_and_summarizers_simulation.rds")
+
+
+}
+
+if (!interactive()) {
+  run_benchmarking_methods()
+}
+
+if (!interactive()) {
  # param_list <- push_list(param_list,
  #   default_simulation_params(
  #   prediction_method = "copula",
@@ -432,23 +460,6 @@ if (!interactive()) {
  #                      )
  # )
 
-  # result_list <- purrr::map(param_list, \(x) {
-  #   analys_res <- run_study_find_posterior(data_list_short, x, "RejTest")
-  #   results_with_metrics <- sample_and_add_metrics(analys_res)
-  #   results_with_metrics$posterior <- NULL
-  #   file_name <- create_file_name(x, "RejTest")
-  #   print(glue::glue("Saving results to {file_name}"))
-  #   saveRDS(results_with_metrics, file_name)
-  #   analys_res$results <- results_with_metrics
-  #   analys_res
-  # })
-#
-  # res_combined <- result_list |> combine_simulation_results()
-#
-  # saveRDS(res_combined, "dev/output/compare_errors_and_summarizers_simulation.rds")
-#
-  # print("Results saved to dev/output/compare_errors_and_summarizers_simulation.rds")
-
 
 #   run_study_find_posterior(data_list_short, get_linear_decoupler(), get_median_summarizing_function(), prediction_method="copula",
 #             copula_model = "vine",
@@ -515,5 +526,3 @@ if (!interactive()) {
 #
   # print("Results saved to dev/output/compare_errors_and_summarizers_simulation.rds")
 }
-
-

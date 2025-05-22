@@ -170,7 +170,7 @@ partition_and_fit_copulas <- function(cdf_matrix, copula_model, threshold, fit_s
   )
 }
 
-wrap_copula <- function(copula) {
+wrap_copula <- function(copula, method=NULL) {
   if (inherits(copula, "vinecop")) {
     density_function <- function(u_vec, log=FALSE) {
       if (log) {
@@ -183,23 +183,33 @@ wrap_copula <- function(copula) {
       rvinecopulib::pvinecop(u_vec, copula)
     }
 
-    return(list(
+    ret = list(
       density = density_function,
       distribution = distribution_function,
       copula=copula
-    ))
+    )
   } else if (inherits(copula, "copula") || inherits(copula, "indepCopula")) {
-    return(list(
+    ret = list(
       density = \(u, log=FALSE) copula::dCopula(u, copula, log=log),
       distribution = \(u) copula::pCopula(u, copula),
       copula=copula
-    ))
+    )
   } else {
     stop(paste("Unknown copula type", class(copula)))
   }
+  if (!is.null(method)) {
+    ret$method = method
+  }
+  ret
 }
 
-fit_hiarchical_copula <- function(pseudo_obs, eta=1, eps=1e-10) {
+get_wrapped_independence_copula <- function(D, method="indep") {
+  # create a independence copula
+  indep_copula <- copula::indepCopula(dim = D)
+  wrap_copula(indep_copula, method=method)
+}
+
+fit_hiarchical_copula <- function(pseudo_obs, eta=1, recover_numerical_failure=FALSE, eps=1e-10) {
   # fit a hierarchical copula
   pseudo_obs <- pmin(pmax(pseudo_obs, eps), 1 - eps) # prevent Inf and -Inf.
   normal_space <- qnorm(pseudo_obs) # stan model expects this transformation already to be made
@@ -216,18 +226,35 @@ fit_hiarchical_copula <- function(pseudo_obs, eta=1, eps=1e-10) {
 
   # load copula_hiarch_model.stan
   mod <- load_stan_copula_model()
-  tryCatch({
-    fit_map <- rstan::optimizing(
+  fit_map <- tryCatch({
+     rstan::optimizing(
       mod,
       data = data_list #, verbose = TRUE
     )
     }, error = function(e) {
-      rlang::abort(paste0("Stan model did not converge. Error message is: ", e$message),
-                   class="stan_optimization_error", parent=e)
+      if (recover_numerical_failure) {
+        rlang::inform(paste0("Stan model did not converge. Error message is: ", e$message, ". Recovering to independence copula."),
+                     class="stan_optimization_warning")
+        return("recover")
+      } else {
+        rlang::abort(paste0("Stan model did not converge. Error message is: ", e$message),
+                     class="stan_optimization_error", parent=e)
+      }
     }, warning = function(w) {
-      rlang::warn(paste0("Stan model did not converge. Warning message is: ", w$message),
-                  class="stan_optimization_warning")
+      if (recover_numerical_failure) {
+        rlang::inform(paste0("Stan model did not converge. Warning message is: ", w$message, ". Recovering to independence copula."),
+                      class="stan_optimization_warning")
+        return("recover")
+      } else {
+        rlang::warn(paste0("Stan model did not converge. Warning message is: ", w$message),
+                    class="stan_optimization_warning")
+    }
   })
+
+  if (is.character(fit_map) && fit_map == "recover") {
+    # Return an independence copula
+    return(get_wrapped_independence_copula(D, method="recovered hierarchical"))
+  }
 
   if (fit_map$return_code != 0) {
     rlang::abort(paste0("Stan model did not converge. Warning code is: ", fit_map$return_code),
@@ -252,7 +279,7 @@ fit_copula <- function(pseudo_obs, copula_model = "joe",
                        family_set = c("gaussian","indep"),
                        selcrit="mbicv", psi0=0.5,
                        copula_fit_method="itau",
-                       threshold=0.5, eta=1) {
+                       threshold=0.5, eta=1, recover_numerical_failure=FALSE) {
   if (ncol(pseudo_obs) == 1) {
     indep1DCopula = copula::indepCopula(dim=1)
 
@@ -264,7 +291,7 @@ fit_copula <- function(pseudo_obs, copula_model = "joe",
 
   if (copula_model == "hierarchical") {
     # fit a hierarchical copula
-    return(fit_hiarchical_copula(pseudo_obs, eta=eta))
+    return(fit_hiarchical_copula(pseudo_obs, eta=eta, recover_numerical_failure=recover_numerical_failure))
   }
 
   res <- checkmate::check_number(nrow(pseudo_obs), lower=10)
@@ -1025,7 +1052,8 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
                                            rejection_min_experts=3,
                                            rejection_test="distance_correlation",
                                            connection_threshold=NULL,
-                                           connection_metric="distance_correlation") {
+                                           connection_metric="kendall",
+                                           recover_numerical_failure=FALSE) {
   checkmate::assert_array(training_estimates, "numeric", d=3)
   checkmate::assert_numeric(training_realizations)
   checkmate::assert_matrix(test_matrix, "numeric")
@@ -1050,7 +1078,7 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
   training_dim <- dim(training_estimates)
   checkmate::assert_set_equal(training_dim, c(length(training_realizations), E, D), ordered=TRUE)
   res <- checkmate::check_number(training_dim[1], lower=10)
-  if (is.character(res) && copula_model != "indep") {
+  if (is.character(res) && !(copula_model %in% c("indep", "hierarchical"))) {
     stop("Number of training samples ('dim(training_estimates)[1]') must be at least 10. This comes from a hard coded limit in the rvinecopula (and vineCopula) package.")
   }
 
@@ -1552,10 +1580,12 @@ study_test_performance <- function(study_data, sim_params = NULL) {
           vine_fit_settings = p$vine_fit_settings,
           error_estimation_settings = p$error_estimation_settings,
           q_support_restriction = p$q_support_restriction,
+          q_support_overshoot = p$q_support_overshoot,
           rejection_test = p$rejection_test,
           rejection_threshold = p$rejection_threshold,
           rejection_min_experts = p$rejection_min_experts,
-          connection_threshold = p$connection_threshold
+          connection_threshold = p$connection_threshold,
+          recover_numerical_failure = p$recover_numerical_failure,
         )
         }, error = \(e) {
           warning(e)
@@ -1677,8 +1707,10 @@ default_simulation_params <- function(copula_model = "joe",
                                       error_estimation_settings = list(),
                                       vine_fit_settings=list(),
                                       q_support_restriction=NULL,
-                                      overshoot=0.1,
-                                      connection_threshold=NULL) {
+                                      q_support_overshoot=0.1,
+                                      connection_threshold=NULL,
+                                      connection_metric="kendall",
+                                      recover_numerical_failure=FALSE) {
   checkmate::assert_string(copula_model)
   checkmate::assert_numeric(k_percentiles, sorted=TRUE, lower=0, upper=100)
   checkmate::assert_string(interpolation)
@@ -1694,7 +1726,7 @@ default_simulation_params <- function(copula_model = "joe",
   checkmate::assert_list(error_estimation_settings)
   checkmate::assert_list(vine_fit_settings)
   checkmate::assert_string(q_support_restriction, null.ok=TRUE)
-  checkmate::assert_number(overshoot, lower=0, finite=TRUE)
+  checkmate::assert_number(q_support_overshoot, lower=0, finite=TRUE)
   checkmate::assert_number(connection_threshold, null.ok=TRUE, lower=0, upper=1)
 
 
@@ -1711,8 +1743,10 @@ default_simulation_params <- function(copula_model = "joe",
     vine_fit_settings = vine_fit_settings,
     error_estimation_settings=error_estimation_settings,
     q_support_restriction=q_support_restriction,
-    overshoot=overshoot,
-    connection_threshold=connection_threshold
+    q_support_overshoot=q_support_overshoot,
+    connection_threshold=connection_threshold,
+    connection_metric=connection_metric,
+    recover_numerical_failure=recover_numerical_failure
   )
   class(params) <- "simulation_parameters"
   params

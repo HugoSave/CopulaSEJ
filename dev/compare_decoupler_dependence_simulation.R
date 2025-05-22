@@ -26,7 +26,7 @@ calculate_decoupler_values <- function(study_data, m_func, decoupler_f, k_percen
 
 metric_list <- list(
   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_CDF_decoupler()),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(D_tilde = 3, compose_sigmoid = FALSE, short_name="Linear")),
+  #list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(D_tilde = 3, compose_sigmoid = FALSE, short_name="Linear")),
   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_E", short_name="Linear_MnE")),
   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_G", short_name="Linear_MnG")),
   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "median", short_name="Linear_Md")),
@@ -164,7 +164,7 @@ decoupler_test_output_file_name <- function(
 
 # run if not interactive
 if (!interactive()) {
-  reject_experts = TRUE
+  reject_experts = FALSE
   rejection_threshold = 0.05
   rejection_test = "distance_correlation"
   rej_expert_str <- ifelse(reject_experts, paste0("RejE(", rejection_threshold, ")"), "noR")

@@ -226,14 +226,6 @@ get_copula_estimation_settings <- function() {
     list(
       copula_model = "hierarchical",
       vine_fit_settings = list(
-        eta=100
-      ),
-      connection_threshold = 0.7,
-      connection_metric = "kendall"
-    ),
-    list(
-      copula_model = "hierarchical",
-      vine_fit_settings = list(
         eta=10
       ),
       connection_threshold = 0.5,

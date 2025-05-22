@@ -24,7 +24,7 @@ For every study we would want to calculate some error metric for each question. 
 # run_error_dependence_simulation(output_file="output/dcors_df.rds")
 #dcors_df = readRDS("output/dcors_df.rds")
 dcors_df = readRDS(decoupler_test_output_file_name(
-  reject_experts=T,# F,
+  reject_experts=F,# F,
   rejection_threshold=0.05,
   date=Sys.Date(),
   rel_dev=TRUE
@@ -111,7 +111,7 @@ extract_error_metric <- function(name_str) {
 }
 nr_studies = length(unique(dcors_df$study_id))
 # get the t test p values for the corrected dcor
-a = dcors_df |> filter(!is.na(p_value_Q)) |> mutate(dcor_T_p_value = p_value_Q)
+a = dcors_df |> filter(!is.na(p_value_Q)) |> filter(D_tilde==1) |> mutate(dcor_T_p_value = p_value_Q)
 
 # a = a |> mutate("Summarizing function" = extract_summarizing_function(name), "Error metric" =extract_error_metric(name)) |> 
 #   group_by(study_id, `Summarizing function`) |> mutate("Best in study"=if_else(dcorT == min(dcorT), T,F)) |> ungroup()
