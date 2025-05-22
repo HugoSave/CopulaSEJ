@@ -1,20 +1,3 @@
-calculate_error <- function(data, err_metric = "error") {
-  # Calculate the error of the median assessment relative to the realization.
-  if (err_metric == "error") {
-    data$`50th percentile` - data$realization
-  } else if (err_metric == "rel_error") {
-    (data$`50th percentile` - data$realization) / data$realization
-  } else {
-    stop("Unknown error metric")
-  }
-}
-
-create_error_observations <- function(data, err_metric = "error") {
-  # if we have E experts we get a E dimensional return
-  # if we have N questions then we have N observations
-  data$error <- calculate_error(data, err_metric)
-  t(data |> split(data$question_id) |> map( ~ .$error) |> simplify2array())
-}
 
 widen_error_per_expert <- function(study_data, err_name = "error") {
   # Flatten the data per expert_id
@@ -216,11 +199,13 @@ wrap_copula <- function(copula) {
   }
 }
 
-fit_hiarchical_copula <- function(pseudo_obs, eta=1) {
+fit_hiarchical_copula <- function(pseudo_obs, eta=1, eps=1e-10) {
   # fit a hierarchical copula
+  pseudo_obs <- pmin(pmax(pseudo_obs, eps), 1 - eps) # prevent Inf and -Inf.
   normal_space <- qnorm(pseudo_obs) # stan model expects this transformation already to be made
   N = nrow(pseudo_obs)
   D = ncol(pseudo_obs)
+
 
   data_list <- list(
     N = N,
@@ -231,12 +216,22 @@ fit_hiarchical_copula <- function(pseudo_obs, eta=1) {
 
   # load copula_hiarch_model.stan
   mod <- load_stan_copula_model()
-  fit_map <- rstan::optimizing(
-    mod,
-    data = data_list#, verbose = TRUE
-  )
+  tryCatch({
+    fit_map <- rstan::optimizing(
+      mod,
+      data = data_list #, verbose = TRUE
+    )
+    }, error = function(e) {
+      rlang::abort(paste0("Stan model did not converge. Error message is: ", e$message),
+                   class="stan_optimization_error", parent=e)
+    }, warning = function(w) {
+      rlang::warn(paste0("Stan model did not converge. Warning message is: ", w$message),
+                  class="stan_optimization_warning")
+  })
+
   if (fit_map$return_code != 0) {
-    stop(paste0("Stan model did not converge. Please check the model and the data. Warning code is: ", fit_map$return_code))
+    rlang::abort(paste0("Stan model did not converge. Warning code is: ", fit_map$return_code),
+          "stan_optimization_error")
   }
   # extract the parameters with names Sigma[i,j]
   nr_params = D*D*2

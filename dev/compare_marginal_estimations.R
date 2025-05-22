@@ -125,7 +125,6 @@ evalute_marginal_fit <-  function(study_data, decoupler, get_posterior_obj, k_pe
 }
 
 
-
 run_decoupler_margin_comparison <- function() {
   library(devtools)
   devtools::load_all(".")

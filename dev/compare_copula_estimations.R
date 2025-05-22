@@ -1,3 +1,5 @@
+source("dev/dev_utils.R")
+
 compose_copula_settings_with_posterior_fitting <- function(copula_setting) {
   purrr::partial(
     fit_and_construct_posterior_indep,
@@ -21,6 +23,7 @@ evalute_copula_fit <- function(study_data,
                                k_percentiles = c(5, 50, 95)) {
   fold_combinations <- create_cross_validation_sets(study_data)
 
+  study_id <- study_data$study_id |> unique()
   stats <- purrr::pmap(fold_combinations, function(training_set, test_set) {
     arr_format <- df_format_to_array_format(
       training_set,
@@ -28,6 +31,26 @@ evalute_copula_fit <- function(study_data,
       get_three_quantiles_summarizing_function()$f,
       k_percentiles
     )
+    test_question_id <- test_set$question_id |> unique()
+    stopifnot(length(test_question_id) == 1)
+
+    # post_obj <- withCallingHandlers(
+    #   get_posterior_obj(
+    #     arr_format$training_summaries,
+    #     arr_format$training_realizations,
+    #     arr_format$test_summaries,
+    #     decoupler
+    #   ),
+    #   stan_optimization_error = function(e) {
+    #     browser()
+    #     message("Stan optimization error: ", conditionMessage(e), "for study_id: ", study_id, "and question_id: ", test_question_id)
+    #     return(NULL)
+    #   },
+    #   stan_optimization_warning = function(w) {
+    #     message("Stan optimization warning: ", conditionMessage(w), "for study_id: ", study_id, "and question_id: ", test_question_id)
+    #     return(NULL)
+    #   }
+    # )
 
     post_obj <- tryCatch(
       get_posterior_obj(
@@ -36,14 +59,21 @@ evalute_copula_fit <- function(study_data,
         arr_format$test_summaries,
         decoupler
       ),
-      error = function(e) {
-        if (grepl("Stan model did not converge", e$message)) {
-          return(NULL)
-        } else {
-          stop(e)  # re-throw the error if it's a different one
-        }
+      stan_optimization_error = function(e) {
+        browser()
+        message("Stan optimization error: ", conditionMessage(e), "for study_id: ", study_id, "and question_id: ", test_question_id)
+        return(NULL)
+      },
+      stan_optimization_warning = function(w) {
+        message("Stan optimization warning: ", conditionMessage(w), "for study_id: ", study_id, "and question_id: ", test_question_id)
+        return(NULL)
+      },
+      error = function(e) { # for some reason not all 'stan_optimization_error' errors are caught by the stan_optimization_error handle
+        message("Error: ", conditionMessage(e), "for study_id: ", study_id, " and question_id: ", test_question_id)
+        return(NULL)
       }
     )
+
     if (is.null(post_obj)) {
       return(tibble::tibble_row(
           likelihood = NA,
@@ -54,7 +84,6 @@ evalute_copula_fit <- function(study_data,
     }
     copula <- post_obj$decoupler_copula
     decoupler_margins <- post_obj$decoupler_margins
-    stopifnot((test_set$question_id |> unique() |> length()) == 1)
     q_realization <- test_set$realization |> unique()
     test_decouple_values <- decoupler$f(q_realization, arr_format$test_summaries) # 1xEx\tilde{D}
     flattened <- abind::adrop(test_decouple_values, drop = 1) |> flatten_matrix_row_by_row()
@@ -65,7 +94,7 @@ evalute_copula_fit <- function(study_data,
     tibble::tibble_row(
       likelihood = copula$density(cdf_values),
       cum_prob = copula$distribution(cdf_values),
-      test_question_id = test_set$question_id |> unique(),
+      test_question_id = test_question_id,
     )
   }) |> purrr::list_rbind()
   stats$study_id <- study_data$study_id |> unique()
@@ -73,8 +102,10 @@ evalute_copula_fit <- function(study_data,
 }
 
 run_copula_estimation_comparision <- function(seed=42) {
+  devtools::load_all(".")
   studies <- load_data_49(relative_dev_folder = FALSE)
   studies <- filter_studies_few_questions(studies, min_questions = 11)
+  studies <- filter_study_remove_ids(studies, 7) # study with 48 experts.
   copula_settings <- get_copula_estimation_settings()
   decoupler = get_CDF_decoupler(overshoot = 0.1)
 
@@ -84,7 +115,7 @@ run_copula_estimation_comparision <- function(seed=42) {
   )
 
   set.seed(seed)
-  res <- purrr::pmap(combinations, \(study, setting) {
+  res <- purrr::pmap(combinations[194,], \(study, setting) {
     get_posterior_func = compose_copula_settings_with_posterior_fitting(setting)
     evaluation <- evalute_copula_fit(
       study,
@@ -94,11 +125,11 @@ run_copula_estimation_comparision <- function(seed=42) {
     )
     evaluation$settings <- get_setting_name(setting)
     evaluation
-  })
+  }, .progress = "Evaluating copula settings")
   res_df <- purrr::list_rbind(res)
   # save
   print("Saving results to output/copula_estimation_comparison.rds")
-  saveRDS(res_df, file = "output/copula_estimation_comparison.rds")
+  saveRDS(res_df, file = "dev/output/copula_estimation_comparison.rds")
 }
 
 get_setting_name <- function(setting) {
@@ -133,9 +164,9 @@ get_setting_name <- function(setting) {
     if (!is.null(vfs$threshold)) {
       name_parts <- c(name_parts, paste0("thr", vfs$threshold))
     }
-    if (!is.null(ct)) {
-      name_parts <- c(name_parts, paste0("ct", ct))
-    }
+  }
+  if (!is.null(ct)) {
+    name_parts <- c(name_parts, paste0("ct", ct))
   }
 
   # Specifics for 'frank'
@@ -150,29 +181,77 @@ get_setting_name <- function(setting) {
 
 get_copula_estimation_settings <- function() {
   list(
+    #list(
+    #  copula_model = "hierarchical",
+    #  vine_fit_settings = list(
+    #    eta=1
+    #  )
+    #),
+    #list(
+    #  copula_model = "hierarchical",
+    #  vine_fit_settings = list(
+    #    eta=10
+    #  )
+    #),
+    #list(
+    #  copula_model = "hierarchical",
+    #  vine_fit_settings = list(
+    #    eta=100
+    #  )
+    #),
     list(
       copula_model = "hierarchical",
       vine_fit_settings = list(
         eta=1
-      )
+      ),
+      connection_threshold = 0.7,
+      connection_metric = "kendall"
     ),
     list(
       copula_model = "hierarchical",
       vine_fit_settings = list(
         eta=10
-      )
+      ),
+      connection_threshold = 0.7,
+      connection_metric = "kendall"
     ),
     list(
       copula_model = "hierarchical",
       vine_fit_settings = list(
         eta=100
-      )
+      ),
+      connection_threshold = 0.7,
+      connection_metric = "kendall"
     ),
     list(
-      copula_model = "frank",
-      vine_fit_settings = list(),
-      connection_threshold = NULL
+      copula_model = "hierarchical",
+      vine_fit_settings = list(
+        eta=100
+      ),
+      connection_threshold = 0.7,
+      connection_metric = "kendall"
     ),
+    list(
+      copula_model = "hierarchical",
+      vine_fit_settings = list(
+        eta=10
+      ),
+      connection_threshold = 0.5,
+      connection_metric = "kendall"
+    ),
+    list(
+      copula_model = "hierarchical",
+      vine_fit_settings = list(
+        eta=10
+      ),
+      connection_threshold = 0.9,
+      connection_metric = "kendall"
+    ),
+    #list(
+    #  copula_model = "frank",
+    #  vine_fit_settings = list(),
+    #  connection_threshold = NULL
+    #),
     list(
       copula_model = "indep",
       vine_fit_settings = list(),
@@ -187,13 +266,13 @@ get_copula_estimation_settings <- function() {
         threshold = 0.0
       )
     ),
-    list(
-      copula_model = "vine",
-      vine_fit_settings = list(
-        family_set = c("onepar", "indep"),
-        selcrit = "aic"
-      )
-    ),
+    #list(
+    #  copula_model = "vine",
+    #  vine_fit_settings = list(
+    #    family_set = c("onepar", "indep"),
+    #    selcrit = "aic"
+    #  )
+    #),
     # list(
     #   copula_model = "vine",
     #   vine_fit_settings = list(
@@ -210,8 +289,9 @@ get_copula_estimation_settings <- function() {
         selcrit = "mbicv",
         psi0 = 0.9
       ),
-      connection_threshold = 0.05
-    ),
+      connection_threshold = 0.7,
+      connection_metric = "kendall"
+    )
     #list(
     #  copula_model = "vine",
     #  vine_fit_settings = list(
@@ -222,15 +302,6 @@ get_copula_estimation_settings <- function() {
     #  ),
     #  connection_threshold = 0.05
     #),
-    list(
-      copula_model = "vine",
-      vine_fit_settings = list(
-        family_set = c("onepar", "indep"),
-        selcrit = "aic",
-        psi0 = 0.9,
-        threshold = 0.8
-      ),
-      connection_threshold = 0.05
-    )
+
   )
 }

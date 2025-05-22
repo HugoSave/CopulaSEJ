@@ -102,7 +102,7 @@ run_decoupler_summarizer_dependence_analysis <- function(
 
     if (any(!is.finite(Z_flat))) {
       warning(glue::glue("Values are not finite for study {study_id} with metric {metrics$m$name} and decoupler {metrics$decoupler$name}. Returning NA."))
-      list(
+      tibble::tibble_row(
         dcor=NA,
         dcorT=NA,
         p_value_T=NA,
@@ -115,7 +115,7 @@ run_decoupler_summarizer_dependence_analysis <- function(
         study_id=study_id,
         dcor_test=NA,
         dcor_T_test=NA,
-        experts_rejected=experts_rejected,
+        experts_rejected=list(experts_rejected),
         nr_experts_rejected=nr_experts_rejected,
         nr_questions=nr_questions
       )
@@ -123,7 +123,7 @@ run_decoupler_summarizer_dependence_analysis <- function(
       dcorT_test_M <- CopulaSEJ:::fixed_dcorT_test(Z_flat, M_flat)
       dcorT_test_Q <- CopulaSEJ:::fixed_dcorT_test(Z_flat, realizations)
       dcor_result = energy::dcor.test(Z_flat, M_flat, R=200)
-      list(dcor_M=dcor_result$estimates["dCor"],
+      tibble::tibble_row(dcor_M=dcor_result$estimates["dCor"],
            dcorT_M=dcorT_test_M$estimate,
            dcorT_Q=dcorT_test_Q$estimate,
            p_value_M=dcorT_test_M$p.value,
@@ -134,19 +134,21 @@ run_decoupler_summarizer_dependence_analysis <- function(
            name=name, study_id=study_id,
            m=metrics$m$short_name,
            decoupler=metrics$decoupler$short_name,
-           dcor_test=dcor_result,
+           dcor_test_M=dcor_result,
            dcor_T_test_M=dcorT_test_M,
            dcorT_test_Q=dcorT_test_Q,
-           experts_rejected=experts_rejected,
+           experts_rejected=list(experts_rejected),
            nr_experts_rejected=nr_experts_rejected,
            nr_questions=nr_questions
       )
     }
-  }, .progress = TRUE) |> purrr::list_transpose()
+  }, .progress = TRUE) |> purrr::list_rbind()
 
-  df_results <- tibble(!!!study_results)
+  #browsr
+  #df_results <- tibble(!!!study_results)
 
-  saveRDS(df_results, output_file)
+  print(glue::glue("Saving results to {output_file}"))
+  saveRDS(study_results, output_file)
 }
 
 decoupler_test_output_file_name <- function(
