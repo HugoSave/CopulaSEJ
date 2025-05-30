@@ -78,6 +78,21 @@ new_error_metric <- function(name,
   ))
 }
 
+#' Title
+#'
+#' @param name
+#' @param f,f_prime_q (q,m) returns (NxExD)
+#' @param f_increasing
+#' @param D_tilde
+#' @param fix_m
+#' @param f_inverse
+#' @param short_name
+#' @param ideal_mean_var
+#'
+#' @returns
+#' @export
+#'
+#' @examples
 new_decoupler <- function(name, f, f_prime_q, f_increasing, D_tilde, fix_m=NULL, f_inverse=NULL, short_name=NULL, ideal_mean_var=NULL) {
   checkmate::assert_string(name)
   checkmate::assert_function(f, args=c("q", "m"), ordered=TRUE)

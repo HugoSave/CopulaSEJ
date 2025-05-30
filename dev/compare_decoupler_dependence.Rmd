@@ -23,19 +23,27 @@ For every study we would want to calculate some error metric for each question. 
 ```{r}
 # run_error_dependence_simulation(output_file="output/dcors_df.rds")
 #dcors_df = readRDS("output/dcors_df.rds")
-dcors_df = readRDS(decoupler_test_output_file_name(
+dcors_df_rejection = readRDS(decoupler_test_output_file_name(
   reject_experts=T,# F,
   rejection_threshold=0.05,
   date=Sys.Date(),
   rel_dev=TRUE
 ))
 
+dcors_df_noRej = readRDS(decoupler_test_output_file_name(
+  reject_experts=F,# F,
+  date=Sys.Date(),
+  rel_dev=TRUE
+))
+
+stopifnot(nrow(dcors_df_rejection) == nrow(dcors_df_noRej))
+dcors_df_noRej$rejection=FALSE
+dcors_df_rejection$rejection=TRUE
+dcors_df <- rbind(dcors_df_noRej, dcors_df_rejection)
 
 #dcors_df$name = paste0(dcors_df$m, ":", dcors_df$decoupler)
 dcors_df$name = paste0(dcors_df$decoupler)
 #dcors_df$T_stat = purrr::map_dbl(dcors_df$dcor_T_test, \(x) if (identical(x, NA)) NA else  x$statistic)
-dcors_df$nu = dcors_df$nr_questions * (dcors_df$nr_questions - 3)/2
-dcors_df$approx_normal = sqrt(dcors_df$nu-1) * dcors_df$dcorT_Q
 ```
 ```{r}
 y25 = qnorm(0.25)
@@ -50,19 +58,29 @@ normal_stats <- data.frame(
   y75 = y75,
   y100 = y75 + 1.5 * (y75 - y25)
 )
+# Assymptotic R^* dependence
+get_assymptotic_dependency_plot <- function(df) {
+  df$nu = df$nr_questions * (df$nr_questions - 3)/2
+  df$approx_normal = sqrt(df$nu-1) * df$dcorT_Q
 
-p <- dcors_df |> filter(!is.na(approx_normal)) |> 
-  ggplot(aes(x=name, y=approx_normal)) + geom_boxplot()  + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  df |> filter(!is.na(approx_normal)) |> 
+  ggplot(aes(x=name, y=approx_normal, fill=rejection)) + geom_boxplot()  + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
    geom_boxplot(
    aes(x=x, ymin = y0, lower = y25, middle = 0, upper = y75, ymax = y100),
    data=normal_stats,
    stat = "identity",
    inherit.aes = FALSE
  ) + labs(x=NULL, y =parse(text="sqrt(nu-1)(paste(R,'*'))"))
-approx_normal_filename <- if (reject_experts) "approx_normal_reject_experts.png" else "approx_normal.png"
-ggsave(glue::glue("output/{approx_normal_filename}"), p, width=10, height=5)
-p
+}
+
+assymptotic_p <- get_assymptotic_dependency_plot(dcors_df)
+#assymptotic_p <- get_assymptotic_dependency_plot(dcors_df_noRej)
+#assymptotic_rejection_p <- get_assymptotic_dependency_plot(dcors_df_rejection)
+approx_normal_filename <- "approx_normal_depdenency.png"
+ggsave(glue::glue("output/{approx_normal_filename}"), assymptotic_p, width=10, height=5)
+assymptotic_p
 ```
+
 ```{r}
 dcors_df$dcor_corrected = dcors_df$dcor_T_test |> map_dbl(\(x) {
    if (identical(x, NA)){
@@ -109,30 +127,34 @@ extract_error_metric <- function(name_str) {
   # remove and
   return(str_remove(error_metric, "and "))
 }
+
 nr_studies = length(unique(dcors_df$study_id))
+create_dependency_rejection_table <- function(df) {
+  a = df |> filter(!is.na(p_value_Q)) |> filter(D_tilde==1) |> mutate(dcor_T_p_value = p_value_Q)
+  
+  # a = a |> mutate("Summarizing function" = extract_summarizing_function(name), "Error metric" =extract_error_metric(name)) |> 
+  #   group_by(study_id, `Summarizing function`) |> mutate("Best in study"=if_else(dcorT == min(dcorT), T,F)) |> ungroup()
+  a = a  |> group_by(study_id) |> #, D, D_tilde) |> 
+    mutate("Best in study"=if_else(dcor_T_p_value == max(dcor_T_p_value), T,F)) |> ungroup()
+  
+  # for each name get the percentage of p values less than 0.05
+  table = a |> filter(!is.nan(dcor_T_p_value)) |> group_by(decoupler) |> summarize(
+    "H_0 Rejected (% of studies)" = paste(round(mean(dcor_T_p_value < 0.05)*100), "%", sep=""),
+   `Highest p value (% of studies)`=str_glue("{round(100*sum(`Best in study`)/nr_studies, digits=0)}%"),
+   #D=unique(D),
+   #D_tilde=unique(D_tilde),
+   avg_nr_experts_rejected = round(mean(nr_experts_rejected), digits=1)
+   )
+  
+  # sort table
+  table #= table |> arrange(desc(D), desc(D_tilde))
+  
+}
 # get the t test p values for the corrected dcor
-a = dcors_df |> filter(!is.na(p_value_Q)) |> filter(D_tilde==1) |> mutate(dcor_T_p_value = p_value_Q)
-
-# a = a |> mutate("Summarizing function" = extract_summarizing_function(name), "Error metric" =extract_error_metric(name)) |> 
-#   group_by(study_id, `Summarizing function`) |> mutate("Best in study"=if_else(dcorT == min(dcorT), T,F)) |> ungroup()
-a = a  |> group_by(study_id) |> #, D, D_tilde) |> 
-  mutate("Best in study"=if_else(dcor_T_p_value == max(dcor_T_p_value), T,F)) |> ungroup()
-# plot histogram of p value
-a |> filter(!is.nan(dcor_T_p_value)) |> ggplot(aes(x=dcor_T_p_value)) + geom_histogram(bins=20)
-# for each name get the percentage of p values less than 0.05
-table = a |> filter(!is.nan(dcor_T_p_value)) |> group_by(m, decoupler) |> summarize("H_0 Rejected (% of studies)" = paste(round(mean(dcor_T_p_value < 0.05)*100), "%", sep=""),
- `Highest p value (% of studies)`=str_glue("{round(100*sum(`Best in study`)/nr_studies, digits=0)}%"),
- #`Highest p value (nr of studies)`=sum(`Best in study`),
- D=unique(D),
- D_tilde=unique(D_tilde),
- avg_nr_experts_rejected = round(mean(nr_experts_rejected), digits=1)
- )
-
-# sort table
-table = table |> arrange(desc(D), desc(D_tilde), m)
 # print as latex table
+table_rejection = create_dependency_rejection_table(dcors_df_rejection)
 table_latex = table |> kable("latex", format.args = list(digits=2))
-table
+table_rejection
 ```
 ```{r}
 dcors_df$nr_experts_rejected |> summary()

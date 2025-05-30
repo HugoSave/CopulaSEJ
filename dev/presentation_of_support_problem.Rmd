@@ -15,7 +15,7 @@ summ_fun <- get_three_quantiles_summarizing_function()$f
 
 ```{r}
 study <- studies[[4]]
-test_question_id <- 2
+test_question_id <- 1
 test_set <- study |> filter(question_id == test_question_id)
 training_set <- study |> filter(question_id != test_question_id)
 test_m_matrix <- test_set |> study_df_single_question_to_summary_matrix(summ_fun, k_percentiles)
@@ -29,9 +29,11 @@ res <- fit_and_construct_posterior_indep(
         training_set |> study_df_to_realizations(),
         test_m_matrix,
         cdf_metric,
-        "hierarchical",
-        vine_fit_settings = list(eta=1),
-        error_estimation_settings = list(out_of_boundary="clamp", method="beta_MAP", bw=1),
+        "indep",
+        vine_fit_settings = list(eta=100),
+        error_estimation_settings = list(out_of_boundary="clamp", method="beta_MAP", prior_std=1),
+        #error_estimation_settings = list(out_of_boundary="clamp", method="beta_MLE"),
+        #error_estimation_settings = list(out_of_boundary="clamp", method="uniform", bw=1),
         q_support_restriction = NULL,
         connection_threshold =  NULL,
         connection_metric="kendall"
@@ -47,6 +49,10 @@ s <- sample_log_unnormalized_density(res$posterior$logDM, res$posterior$support,
 ```{r}
 median(s)
 plot(density(s))
+```
+
+```{r}
+res$decoupler_margins |> plot_distributions("pdf")
 ```
 
 

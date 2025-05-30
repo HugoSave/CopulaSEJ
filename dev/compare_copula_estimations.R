@@ -11,7 +11,7 @@ compose_copula_settings_with_posterior_fitting <- function(copula_setting) {
     rejection_threshold = NULL,
     error_estimation_settings = list(
       method = "beta_MAP",
-      prior_var=100
+      prior_std=sqrt(100)
     )
   )
 }

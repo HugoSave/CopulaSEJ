@@ -13,12 +13,17 @@ margin_comparison_file <- "output/margin_estimation_comparison.rds"
 margin_comparisons <- readRDS(margin_comparison_file)
 margin_comparisons$comb <- interaction(margin_comparisons$settings, margin_comparisons$decoupler)
 split_by_setting <- margin_comparisons |> split(margin_comparisons$comb) 
-settings_names <- split_by_setting |> map_chr(\(df) df$comb |> unique() |> as.character())
+margin_settings_names <- split_by_setting |> map_chr(\(df) df$comb |> unique() |> as.character())
 
 margin_comparisons_CDF <- margin_comparisons |> filter(str_ends(comb, "CDF"))
 margin_comparisons_relative <- margin_comparisons |> filter(str_detect(comb, "Relative"))
-
+margin_comparisons_relative <- margin_comparisons_relative |> mutate(k=as.numeric(str_split_i(decoupler, ":", 2)))
+margin_comparisons_relative$k |> unique()
 ```
+```{r}
+nrow(margin_comparisons_CDF)/(length(margin_settings_names) -1)
+```
+
 ```{r}
 
 
@@ -50,6 +55,9 @@ margin_comparisons_CDF |> ggplot(aes(x=cdf_values)) +
 
 ```
 ```{r}
+```
+
+```{r}
 plot_emperical_CDF_compaison <- function(df) {
   ggplot(df, aes(x=cdf_values)) +
     stat_ecdf() +
@@ -57,8 +65,17 @@ plot_emperical_CDF_compaison <- function(df) {
     facet_wrap(vars(comb))
 }
 
+plot_emperical_CDF_compaison_sigmoid <- function(df) {
+  ggplot(df, aes(x=cdf_values)) +
+    stat_ecdf() +
+    geom_abline(slope=1,intercept=0,linetype="dashed") + 
+    facet_grid(vars(decoupler), vars(k))
+}
+
 margin_comparisons_CDF |> plot_emperical_CDF_compaison()
-margin_comparisons_relative |> plot_emperical_CDF_compaison()
+margin_comparisons_relative |> filter(k==1.5) |> plot_emperical_CDF_compaison()
+margin_comparisons_relative |> filter(k==1) |> plot_emperical_CDF_compaison()
+margin_comparisons_relative |> filter(k==0.5) |> plot_emperical_CDF_compaison()
 margin_comp_p <- margin_comparisons |> plot_emperical_CDF_compaison()
 ggsave("output/marginal_comparisons.pdf", margin_comp_p, width=10, height=10)
 margin_comp_p
@@ -95,13 +112,15 @@ cvm_statistic <- split_by_setting |> purrr::map_dbl(\(df) {
 })
 
 # combine to a table
-tibble(
-  setting = settings_names,
+marginal_table <- tibble(
+  setting = margin_settings_names,
   avg_abs_distance = distance_to_uniforms$avg_abs_distance,
   max_distance = distance_to_uniforms$max_distance,
   cvm_statistic = cvm_statistic
 )
 
+# get the 5 rows with lowest cvm_statistic
+marginal_table |> arrange(cvm_statistic) |> head(7)
 
 # cvm_tests |> purrr::map(\(test) { # This is not too informative because I have so many samples it gives really low p values.
 #   test$p.value

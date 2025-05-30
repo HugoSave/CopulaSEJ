@@ -645,10 +645,10 @@ estimate_margin_beta_prior <- function(support, beta_mean, beta_var) {
   list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(beta_vars[1], beta_vars[2], support[1], support[2]))
 }
 
-estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_var=1/12, prior_var=0.1, clamp_epsilon=0.001, out_of_boundary="clamp") {
+estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_var=1/12, prior_std=0.1, clamp_epsilon=0.001, out_of_boundary="clamp") {
   beta_param_centers <- mean_variance_to_beta_params(beta_mean, beta_var, support[1], support[2]) # Wait I am doing this a bit wrong... Needs to be adjusted for the scaling
-  A_prior_params <- mean_variance_to_gamma_params(beta_param_centers[1], prior_var)
-  B_prior_params <- mean_variance_to_gamma_params(beta_param_centers[2], prior_var)
+  A_prior_params <- mean_variance_to_gamma_params(beta_param_centers[1], prior_std**2)
+  B_prior_params <- mean_variance_to_gamma_params(beta_param_centers[2], prior_std**2)
 
   support_width <- support[2] - support[1]
   # if (support_width != 1) {
@@ -832,7 +832,7 @@ estimate_margin_kde <- function(obs, support, bw="SJ", package="stats") {
 #' @export
 #'
 #' @examples
-estimate_margins <- function(observations, supports=NULL, method="beta", overshoot=0.1, out_of_boundary="clamp", bw="SJ", beta_mean=0.5, beta_var=1/12, prior_var=0.1) {
+estimate_margins <- function(observations, supports=NULL, method="beta", overshoot=0.1, out_of_boundary="clamp", bw="SJ", beta_mean=0.5, beta_var=1/12, prior_std=0.1) {
   checkmate::assert_matrix(observations, "numeric")
   nr_dims = ncol(observations)
   checkmate::assert(
@@ -868,7 +868,7 @@ estimate_margins <- function(observations, supports=NULL, method="beta", oversho
     } else if (method =="kde") {
       return(estimate_margin_kde(obs, supports[[i]], bw=bw))
     } else if (method == "beta_MAP") {
-      return(estimate_margin_beta_hiarch(obs, supports[[i]], beta_mean=beta_mean[i], beta_var=beta_var[i], prior_var=prior_var))
+      return(estimate_margin_beta_hiarch(obs, supports[[i]], beta_mean=beta_mean[i], beta_var=beta_var[i], prior_std=prior_std))
     } else if (method == "uniform") {
       if (is.null(supports[[i]])) {
         supports[[i]] <- range(obs) |> widen_support(overshoot=overshoot)

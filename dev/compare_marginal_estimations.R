@@ -38,7 +38,7 @@ decoupler_margin_estimation_settings_to_shortname <- function(settings) {
   #  method="beta_MAP",
   #  beta_mean=0.5,
   #  beta_var=1/12,
-  #  prior_var=1
+  #  prior_std=1
   #)
   settings$method <- switch(
     settings$method,
@@ -46,13 +46,13 @@ decoupler_margin_estimation_settings_to_shortname <- function(settings) {
     "beta_MLE" = "MLE",
     settings$method # default value
   )
-  #settings$prior_var <- switch(
-  #  settings$prior_var
+  #settings$prior_std <- switch(
+  #  settings$prior_std
   #)
 
-  prior_var <- if (!is.null(settings$prior_var)) paste0(":", round(settings$prior_var, digits=4)) else ""
+  prior_std <- if (!is.null(settings$prior_std)) paste0(":", round(settings$prior_std, digits=4)) else ""
   glue::glue(
-    "{settings$method}{prior_var}"
+    "{settings$method}{prior_std}"
   )
 }
 
@@ -70,19 +70,23 @@ decoupler_and_margin_estimation_settings_study <- function() {
   error_estimation_settings_list <- list(
       list(
         method="beta_MAP",
-        prior_var=1000
+        prior_std=1
       ),
       list(
         method="beta_MAP",
-        prior_var=100
+        prior_std=0.5
       ),
       list(
         method="beta_MAP",
-        prior_var=10
+        prior_std=0.1
+      ),
+      list(
+        method="beta_MAP",
+        prior_std=0.05
       ),
      list(
        method="beta_MAP",
-       prior_var=1
+       prior_std=0.01
      ),
     list(
       method="uniform"

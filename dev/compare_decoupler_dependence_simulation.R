@@ -34,11 +34,11 @@ metric_list <- list(
   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_E", short_name="Relative_MnE")),
   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_G", short_name="Relative_MnG")),
   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "median", short_name="Relative_Md")),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_support_ratio_decoupler(global_support = TRUE)),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(D_tilde = 3, compose_sigmoid = FALSE, short_name="Ratio")),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "median", short_name="Ratio_Md")),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_E", short_name="Ratio_MnE")),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_G", short_name="Ratio_MnG"))
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_support_ratio_decoupler(global_support = TRUE))
+  #list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(D_tilde = 3, compose_sigmoid = FALSE, short_name="Ratio")),
+  #list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "median", short_name="Ratio_Md")),
+  #list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_E", short_name="Ratio_MnE")),
+  #list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_G", short_name="Ratio_MnG"))
   # list(m=CopulaSEJ:::get_mean_summarizing_function(unified_support=TRUE), decoupler=CopulaSEJ:::get_sigmoid_linear_decoupler()),
   # list(m=CopulaSEJ:::get_mean_summarizing_function(unified_support=TRUE), decoupler=CopulaSEJ:::get_sigmoid_ratio_decoupler())
 )
@@ -96,7 +96,7 @@ run_decoupler_summarizer_dependence_analysis <- function(
     Z_flat <- CopulaSEJ:::flatten_3d_array_to_matrix(acceped_Z)
     accepted_M <- values$assessments[,accepted_experts,,drop=FALSE]
     M_flat <- CopulaSEJ:::flatten_3d_array_to_matrix(accepted_M)
-    name <- glue::glue("{metrics$m$name}:{metrics$decoupler$name}")
+    name <- glue::glue("{metrics$decoupler$short_name}")
     D=dim(values$assessments)[3]
     D_tilde=dim(values$decoupler_values)[3]
 
@@ -164,7 +164,7 @@ decoupler_test_output_file_name <- function(
 
 # run if not interactive
 if (!interactive()) {
-  reject_experts = TRUE
+  reject_experts = FALSE
   rejection_threshold = 0.05
   rejection_test = "distance_correlation"
   rej_expert_str <- ifelse(reject_experts, paste0("RejE(", rejection_threshold, ")"), "noR")
@@ -172,6 +172,7 @@ if (!interactive()) {
 
   min_nr_experts = 1
   studies <- load_data_49(relative_dev_folder=FALSE)
+  studies <- filter_study_remove_ids(studies, 7)
   run_decoupler_summarizer_dependence_analysis(
     studies,
     metric_list,

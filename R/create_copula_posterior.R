@@ -171,7 +171,7 @@ create_log_unnormalized_posterior_JC <- function(error_copula, expert_distributi
   return(list(logDM=logDM, support=support))
 }
 
-create_log_unnormalized_posterior_indep <- function(indep_copula, indep_margins, indep_class, m_matrix, support=NULL) {
+create_log_unnormalized_posterior_indep <- function(indep_copula, indep_margins, decopuler, m_matrix, support=NULL) {
   checkmate::assert_matrix(m_matrix, "numeric", any.missing = FALSE)
   E = nrow(m_matrix)
   checkmate::assert_list(indep_copula)
@@ -179,16 +179,17 @@ create_log_unnormalized_posterior_indep <- function(indep_copula, indep_margins,
   nr_dims <- dim(indep_copula)[[1]]
   checkmate::assert_list(indep_margins, len=nr_dims)
 
-  indep_fix_m <- indep_class$fix_m(m_matrix)
+  indep_fix_m <- decopuler$fix_m(m_matrix)
 
   #is_increasing_flat <- calc_is_increasing_flat(indep_copula, m)
 
   stopifnot(!is.null(support))
-  # TODO fix support. Have to implement inverse of the indep_class function.
+  # TODO fix support. Have to implement inverse of the decopuler function.
   #support <- indep_margins |> purrr::map(\(x) x$support) |> error_supports_to_q_supports(m, error_metric) |> support_intersection(nested_list=FALSE)
   #support <- calc_support_error_marginals(error_margins, error_metric, m) |> support_intersection(nested_list=FALSE)
 
 
+  # returns a function that takes a vector of q values and returns the log density at those q values
   logDM <- function(q_input) {
     ret_density <- vector("double", length=length(q_input))
     out_of_support <- q_input <= support[1] | q_input >= support[2]
@@ -208,15 +209,11 @@ create_log_unnormalized_posterior_indep <- function(indep_copula, indep_margins,
     cdf_values <- pdf_cdf_vals$cdf_values
 
     log_copula_density_values <- indep_copula$density(cdf_values, log=TRUE)
-    # if (is(indep_copula, "vinecop_dist")) {
-    #   copula_density_values <- rvinecopulib::dvinecop(cdf_values, indep_copula, cores=1)
-    #   log_copula_density_values <- log(copula_density_values)
-    # } else {
-    #   log_copula_density_values <- copula::dCopula(cdf_values, indep_copula, log=TRUE)
-    # }
     added_log_pdf_values <- rowSums(log(pdf_values))
 
-    added_log_e_prime_m <- indep_fix_m$f_prime_q(q_vec) |> abs() |> log() |> rowSums()
+    # indep_fix_m$f_prime_q(q_vec)  is 3d but base::rowSums() still works. It sums over the first dimension.
+    #added_log_e_prime_m <- indep_fix_m$f_prime_q(q_vec) |> abs() |> log() |> base::rowSums()
+    added_log_e_prime_m <- (indep_fix_m$f_prime_q(q_vec) **2 |> base::rowSums() |> log())/2
 
     #added_log_e_prime_m <- calc_sum_log_e_prime_m(error_metric, m, q_vec)
     ret_density[!out_of_support] <- log_copula_density_values + added_log_pdf_values + added_log_e_prime_m

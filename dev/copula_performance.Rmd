@@ -15,16 +15,16 @@ library(knitr)
 library(CopulaSEJ)
 source("dev_utils.R")
 
-file_name <- "output/data49_nov24.rds"
-studies <- readRDS(file_name)
-studies <- filter_studies_few_questions(studies, min_questions=10)
-studies <- filter_study_remove_ids(studies, study_ids=7) 
-
-percentile_names <- k_percentiles_to_colname(c(5, 50, 95))
-
-list_mod <- change_value_in_study_list(studies, percentile_names, 0, 0.0001)
-studies_no_m_zero <- list_mod[[1]]
-modified_studies <- list_mod[[2]]
+#file_name <- "output/data49_nov24.rds"
+#studies <- readRDS(file_name)
+#studies <- filter_studies_few_questions(studies, min_questions=10)
+#studies <- filter_study_remove_ids(studies, study_ids=7) 
+#
+#percentile_names <- k_percentiles_to_colname(c(5, 50, 95))
+#
+#list_mod <- change_value_in_study_list(studies, percentile_names, 0, 0.0001)
+#studies_no_m_zero <- list_mod[[1]]
+#modified_studies <- list_mod[[2]]
 
 ```
 
@@ -33,7 +33,7 @@ modified_studies <- list_mod[[2]]
 #saveRDS(results_df, "dev/output/performance_comparison_new.rds")
 #results_df<-readRDS("output/performance_comparison_new.rds")
 results_df<-readRDS("output/compare_performance_simulation.rds")$results
-results_df <- results_df |> filter(prediction_method == "CohierarchicalCDF3QNoRCT(0.7)")
+results_df <- results_df |> filter(prediction_method %in% c("CohierarchicalCDF3QNoRCT(0.7)", "CoInCDF3QNoRNoCT"))
 benchmark_df<-readRDS("output/benchmarking_methods_performance.rds")$results
 benchmark_df <- benchmark_df |> filter(study_id !=7) # remove study_id 7, not in the normal performance 
 
@@ -41,8 +41,10 @@ stopifnot(nrow(results_df)/length(unique(results_df$prediction_method)) == nrow(
 
 results_df <- rbind(results_df, benchmark_df)
 nr_prediction_methods = length(unique(results_df$prediction_method))
+nr_tests = nrow(results_df)/nr_prediction_methods
 #results_df <- readRDS("output/performance_comparison.rds")
 
+results_df_small <- results_df |> filter(realization <= 1000)
 #results_df <- results_df |> mutate(prediction_method = if_else(str_starts(prediction_method, "DP"), "product", prediction_method))
 
 # results_df <- get_simulation_group_files(rel_dev=TRUE) |> load_files() |> combine_simulation_results()
@@ -81,6 +83,23 @@ pos_values
 abs_values
 ```
 ```{r, fig.width=10}
+
+
+results_df_small |> filter(realization!=0 & prediction!=0) |> mutate(realization=abs(realization), prediction=abs(prediction)) |> 
+  ggplot(aes(realization, prediction, color=prediction_method)) +
+  geom_point() +
+  # add dashed x=y line
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+  coord_fixed(ratio = 1) +
+  labs(title = "Predicted and Realized Values",
+       x = "abs(Realized Value)",
+       y = "abs(Predicted Value)") +
+  scale_y_continuous(trans = "log10")+
+  scale_x_continuous(trans =  "log10")+
+  facet_wrap(~prediction_method) +
+  theme_minimal() + # remove legend 
+  theme(legend.position = "none")
+
 abs_values <- results_df |> filter(realization!=0 & prediction!=0) |> mutate(realization=abs(realization), prediction=abs(prediction)) |> 
   ggplot(aes(realization, prediction, color=prediction_method)) +
   geom_point() +
@@ -93,7 +112,9 @@ abs_values <- results_df |> filter(realization!=0 & prediction!=0) |> mutate(rea
   scale_y_continuous(trans = "log10")+
   scale_x_continuous(trans =  "log10")+
   facet_wrap(~prediction_method) +
-  theme_minimal()
+  theme_minimal() + # remove legend 
+  theme(legend.position = "none")
+
 ggsave("output/abs_values.pdf", abs_values, width = 10, height = 10)
 abs_values
 ```
@@ -108,15 +129,15 @@ stopifnot(nr_0_realizations == nr_0_realizations_other)
 print(paste("Number of infinite relative errors: ", nr_0_realizations))
 
 
-relative_erros_violins <- results_df |> filter(realization != 0 & abs(rel_error) < 10 & study_id <= 20) |> #filter(!(prediction_method %in% c("copula"))) |>
+relative_erros_boxplot <- results_df |> filter(realization != 0 & abs(rel_error) < 10 & study_id <= 20) |> #filter(!(prediction_method %in% c("copula"))) |>
   ggplot(aes(prediction_method, rel_error)) +
-  geom_violin() +
+  geom_boxplot() +
   labs(x = "method",
        y = "Relative Error") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
-ggsave("output/relative_erros_violins.png", relative_erros_violins, width=10)
-relative_erros_violins 
+ggsave("output/relative_erros_boxplot.png", relative_erros_violins, width=10)
+relative_erros_boxplot 
 ```
 ```{r}
 # some plot that per study shows the prediction of a specific method
@@ -178,6 +199,57 @@ times_equal_to_best_rel_error <- result_with_best |> rowwise() |>
                                            ratio_best=n_equal_to_best_rel_error/nr_tests, .groups="drop") 
   
 ```
+```{r}
+pair_performance_comparision <- function(df, method1, method2) {
+  df |> filter(realization!=0 & (prediction_method %in% c(method1, method2))) |> 
+    group_by(study_id, test_question) |> 
+    summarise(abs_rel_error_1 = abs(rel_error[prediction_method==method1]), 
+              abs_rel_error_2 = abs(rel_error[prediction_method==method2]), .groups="drop") |> 
+    mutate(diff = abs_rel_error_1 - abs_rel_error_2) |> 
+    filter(diff!=0) |>
+    summarise(method_one_better=sum(diff<0), 
+              ratio=method_one_better/n(),
+              #mean_diff = mean(diff), 
+              #sd_diff = sd(diff), 
+              n=length(diff))
+}
+method1 = "CoInCDF3QNoRNoCT"
+method2 = "EW"
+table_pair <- pair_performance_comparision(results_df, method1, method2)
+table_pair |> rename("Hiearchry better than EW"="method_one_better")
+```
+```{r}
+sorted_ew <- results_df |> filter(realization!=0 & (prediction_method %in% c(method1, method2))) |> 
+    group_by(study_id, test_question) |> 
+    summarise(abs_rel_error_1 = abs(rel_error[prediction_method==method1]), 
+              abs_rel_error_2 = abs(rel_error[prediction_method==method2]), .groups="drop") |>
+  filter(abs_rel_error_1 < 10 & abs_rel_error_2 < 10) 
+
+
+N = nrow(sorted_ew)
+sorted_ew |> ggplot(aes(x=1:N,y=abs_rel_error_1)) + geom_line() +
+  geom_line(aes(x=1:N,y=abs_rel_error_2), color="red") +
+  labs(title = "Absolute Relative Error",
+       x = "Study ID",
+       y = "Absolute Relative Error") +
+  scale_x_continuous(breaks = seq(1, N, by=10)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# sort by rel error 1
+sorted_ew <- arrange(sorted_ew, abs_rel_error_1)
+sorted_rel1 <- sorted_ew$abs_rel_error_1
+sorted_rel2 <- arrange(sorted_ew, abs_rel_error_2)$abs_rel_error_2
+# plot both sortelrel1 and 2 in same plot
+plot(1:N, sorted_rel1, sorted_rel2)
+
+# pivot longer
+sorted_ew <- sorted_ew |> pivot_longer(-c(study_id, test_question), names_to="prediction_method", values_to = "abs_rel_error") 
+
+pair_selection <- results_df |> filter(realization!=0 & (prediction_method %in% c(method1, method2))) |> select(study_id, test_question, prediction_method, rel_error) 
+pair_selection$id <- interaction(pair_selection$study_id, pair_selection$test_question)
+pair_selection |> filter(abs(rel_error) < 10) |> ggplot(aes(x=id, y=abs(rel_error), color=prediction_method)) + geom_point()
+```
+
 
 
 ```{r}
