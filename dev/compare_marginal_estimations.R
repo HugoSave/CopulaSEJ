@@ -70,33 +70,39 @@ decoupler_and_margin_estimation_settings_study <- function() {
   error_estimation_settings_list <- list(
       list(
         method="beta_MAP",
-        prior_std=1
+        prior_std=1,
+        out_of_boundary="discard"
       ),
-      list(
-        method="beta_MAP",
-        prior_std=0.5
-      ),
-      list(
-        method="beta_MAP",
-        prior_std=0.1
-      ),
-      list(
-        method="beta_MAP",
-        prior_std=0.05
-      ),
-     list(
-       method="beta_MAP",
-       prior_std=0.01
-     ),
+    #  list(
+    #    method="beta_MAP",
+    #    prior_std=0.5,
+    #    out_of_boundary="discard"
+    #  ),
+    #  list(
+    #    method="beta_MAP",
+    #    prior_std=0.1,
+    #    out_of_boundary="discard"
+    #  ),
+    #  list(
+    #    method="beta_MAP",
+    #    prior_std=0.05,
+    #    out_of_boundary="discard"
+    #  ),
+    # list(
+    #   method="beta_MAP",
+    #   prior_std=0.01,
+    #    out_of_boundary="discard"
+    # ),
+    #list(
+    #  method="uniform"
+    #),
     list(
-      method="uniform"
-    ),
-    list(
-      method="beta_MLE"
-    ),
-    list(
-      method="beta_prior"
-    )
+      method="beta_MLE",
+      out_of_boundary="discard"
+    )#,
+    #list(
+    #  method="beta_prior"
+    #)
   )
   combinations <- tidyr::expand_grid(error_estimation_settings=error_estimation_settings_list, decoupler=decouplers )
   combinations
@@ -104,12 +110,24 @@ decoupler_and_margin_estimation_settings_study <- function() {
 
 evalute_marginal_fit <-  function(study_data, decoupler, get_posterior_obj, k_percentiles=c(5,50,95)) {
   fold_combinations <- create_cross_validation_sets(study_data)
+  get_post_safe <- purrr::safely(get_posterior_obj)
 
   stats <- purrr::pmap(fold_combinations, function(training_set, test_set) {
     arr_format <- df_format_to_array_format(training_set, test_set, get_three_quantiles_summarizing_function()$f, k_percentiles)
-    post_obj <- get_posterior_obj(arr_format$training_summaries, arr_format$training_realizations, arr_format$test_summaries, decoupler)
-    decoupler_margins <- post_obj$decoupler_margins
+    #post_obj <- get_posterior_obj(arr_format$training_summaries, arr_format$training_realizations, arr_format$test_summaries, decoupler)
+    safe_result <- get_post_safe(arr_format$training_summaries, arr_format$training_realizations, arr_format$test_summaries, decoupler)
     test_question_id <- test_set$question_id |> unique()
+    if (!is.null(safe_result$error)) {
+      message("Error in get_posterior_obj: ", safe_result$error$message, " for study_id: ", study_data$study_id |> unique(), " and question_id: ", test_set$question_id |> unique())
+      return(tibble::tibble(
+        likelihoods = NA,
+        cdf_values = NA,
+        test_question_id = test_question_id
+      ))
+    } else {
+      post_obj <- safe_result$result
+    }
+    decoupler_margins <- post_obj$decoupler_margins
     stopifnot(length(test_question_id) == 1)
     q_realization <- test_set$realization |> unique()
     test_decouple_values <- decoupler$f(q_realization, arr_format$test_summaries) # 1xEx\tilde{D}
@@ -135,7 +153,7 @@ run_decoupler_margin_comparison <- function() {
   studies <- load_data_49(relative_dev_folder = FALSE) # |> filter_studies_few_questions(min_questions = 11)
   #studies <- filter_study_remove_ids(studies,7)
   settings <- decoupler_and_margin_estimation_settings_study()
-  res <- compare_decoupler_margin_estimations(studies[1], settings)
+  res <- compare_decoupler_margin_estimations(studies, settings)
   print("Saving to file dev/output/margin_estimation_comparison.rds")
   saveRDS(res, file = "dev/output/margin_estimation_comparison.rds")
 }

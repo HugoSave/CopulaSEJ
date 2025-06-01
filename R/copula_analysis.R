@@ -485,13 +485,11 @@ construct_error_distribution_JC_assumption <- function(distribution, error_metri
   error_distributions
 }
 
-
 single_expert_predict <- function(test_set, expert_id) {
   # For a single expert predict the median
   prediction <- test_set |> filter(expert_id == expert_id) |> dplyr::pull(k_percentiles_to_colname(50))
   prediction
 }
-
 
 #' Calculates the unnormalized posteriors of $Q$ when conditioning on a single
 #' $M_i^e$ random variable and assuming a flat prior.
@@ -645,6 +643,18 @@ estimate_margin_beta_prior <- function(support, beta_mean, beta_var) {
   list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(beta_vars[1], beta_vars[2], support[1], support[2]))
 }
 
+create_beta_dist_object <- function(a, b, support) {
+  pdf <- function(e_vec, log=FALSE) {
+    extraDistr::dnsbeta(e_vec, a, b, min=support[1], max=support[2], log=log)
+  }
+
+  cdf <- function(e_vec) {
+    extraDistr::pnsbeta(e_vec, a, b, min=support[1], max=support[2])
+  }
+
+  return(list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(a, b, support[1], support[2])))
+}
+
 estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_var=1/12, prior_std=0.1, clamp_epsilon=0.001, out_of_boundary="clamp") {
   beta_param_centers <- mean_variance_to_beta_params(beta_mean, beta_var, support[1], support[2]) # Wait I am doing this a bit wrong... Needs to be adjusted for the scaling
   A_prior_params <- mean_variance_to_gamma_params(beta_param_centers[1], prior_std**2)
@@ -658,6 +668,17 @@ estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_va
     boundry_offset <- support_width * clamp_epsilon
     inside_support <- c(support[1] + boundry_offset, support[2] - boundry_offset)
     obs_vec <- pmin(pmax(obs_vec, inside_support[1]), inside_support[2])
+  } else if (out_of_boundary=="discard") {
+    obs_vec <- obs_vec |> purrr::discard(\(x) {
+      x <= support[1] | x >= support[2]
+    })
+    if (length(x) == 0) {
+      rlang::warn("No observations left after removing observations on and outside the support boundary. Returning a beta distribution with the prior parameters.",
+                    class="warning_observations_outside_support")
+      return(create_beta_dist_object(beta_param_centers[1], beta_param_centers[2], support))
+    }
+  } else {
+    stop(glue::glue("Unknown out_of_boundary strategy {out_of_boundary} for estimate_margin_beta_hiarch"))
   }
   #zero_to_one_obs <- (obs_vec - support[1])/support_width
 
@@ -677,22 +698,10 @@ estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_va
   fit_map <- rstan::optimizing(
     model,
     #verbose=TRUE,
-    data = data_list # , check_data = FALSE - not sure if I should have this or not.
+    data = data_list # , check_data = FALSE - might create some performance boost
   )
-  fit_map
 
-  map_a <- fit_map$par[[1]]
-  map_b <- fit_map$par[[2]]
-
-  pdf <- function(e_vec, log=FALSE) {
-    extraDistr::dnsbeta(e_vec, map_a, map_b, min=support[1], max=support[2], log=log)
-  }
-
-  cdf <- function(e_vec) {
-    extraDistr::pnsbeta(e_vec, map_a, map_b, min=support[1], max=support[2])
-  }
-
-  list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(map_a, map_b, support[1], support[2]))
+  return(create_beta_dist_object(fit_map$par[[1]],  fit_map$par[[2]], support))
 }
 
 
@@ -714,6 +723,7 @@ estimate_margin_beta <- function(obs_vec, support=NULL, overshoot=0.1, out_of_bo
   min_obs <- min(obs_vec)
   max_obs <- max(obs_vec)
 
+  browser()
   if (is.null(support)) {
     obs_width <- max_obs - min_obs
     support <- c(min_obs - overshoot * obs_width, max_obs + overshoot * obs_width)
@@ -744,7 +754,7 @@ estimate_margin_beta <- function(obs_vec, support=NULL, overshoot=0.1, out_of_bo
 
   if (length(obs_vec) == 0) {
     rlang::abort("No observations left after removing observations on and outside the support boundary.",
-                 class="observations_outside_support")
+                 class="error_observations_outside_support")
   }
   # sum comes from product of log. The joint if error observations are independent
   neg_log_lik <- \(shape1, shape2) -sum(extraDistr::dnsbeta(obs_vec, shape1, shape2, min=support[1], max=support[2], log=TRUE))
