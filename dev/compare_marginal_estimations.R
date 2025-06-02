@@ -34,12 +34,7 @@ decoupler_name_with_settings <- function(decoupler) {
 }
 
 decoupler_margin_estimation_settings_to_shortname <- function(settings) {
-  # settings =list(
-  #  method="beta_MAP",
-  #  beta_mean=0.5,
-  #  beta_var=1/12,
-  #  prior_std=1
-  #)
+
   settings$method <- switch(
     settings$method,
     "beta_MAP" = "MAP",
@@ -118,7 +113,7 @@ evalute_marginal_fit <-  function(study_data, decoupler, get_posterior_obj, k_pe
     safe_result <- get_post_safe(arr_format$training_summaries, arr_format$training_realizations, arr_format$test_summaries, decoupler)
     test_question_id <- test_set$question_id |> unique()
     if (!is.null(safe_result$error)) {
-      message("Error in get_posterior_obj: ", safe_result$error$message, " for study_id: ", study_data$study_id |> unique(), " and question_id: ", test_set$question_id |> unique())
+      message("Caught error in get_posterior_obj: ", safe_result$error$message, " for study_id: ", study_data$study_id |> unique(), " and question_id: ", test_set$question_id |> unique())
       return(tibble::tibble(
         likelihoods = NA,
         cdf_values = NA,
