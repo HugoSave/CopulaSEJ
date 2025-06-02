@@ -68,11 +68,30 @@ sample_log_unnormalized_density <- function(log_density, support, num_samples, s
   }  else if (method=="BayesianTools") {
     bayesian_setup <- BayesianTools::createBayesianSetup(log_density, lower=support[1], upper=support[2])
 
-    bay_settings <- list(iterations=num_samples, startValue=matrix((support[1]+support[2])/2, nrow=2, ncol=1)) # (support[1]+support[2])/2)
+    starting_values <- get_starting_values(support, N=round(num_samples/5), max_width_for_uniform = 1000)
+    bay_settings <- list(iterations=num_samples, startValue=matrix(starting_values, nrow=length(starting_values), ncol=1))
     bayesian_tools_samples <- BayesianTools::runMCMC(bayesian_setup, sampler="DEzs", settings=bay_settings)
     bayesian_tools_samples$Z
   }
   else{
     armspp::arms(num_samples, log_density, support[1] , support[2])
+  }
+}
+
+get_starting_values <- function(support, N=1000, max_width_for_uniform = 1000) {
+  if (is.infinite(support[1]) || is.infinite(support[2])) {
+    stop("not yet implemented")
+  }
+  width = support[2] - support[1]
+  if (width < max_width_for_uniform) {
+    # if the support is very small, just return the middle point
+    return(runif(N, support[1], support[2]))
+  }
+  if (support[1] > 0 & support[2] >0) {
+    return(exp(runif(N, log(support[1]), log(support[2]))))
+  } else if (support[1] < 0 & support[2] < 0) {
+    return(-exp(runif(N, log(-support[2]), log(-support[1]))))
+  } else {
+    return(runif(N, support[1], support[2]))
   }
 }

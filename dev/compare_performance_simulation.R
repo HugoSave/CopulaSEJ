@@ -323,7 +323,7 @@ run_performance_test <- function() {
                              rejection_test = "distance_correlation",
                              error_estimation_settings = list(
                                method = "beta_MAP",
-                               prior_std=0.1,
+                               prior_std=0.1
                              ),
                              vine_fit_settings = list(
                                eta=10,

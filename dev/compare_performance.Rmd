@@ -42,9 +42,12 @@ stopifnot(nrow(results_df)/length(unique(results_df$prediction_method)) == nrow(
 results_df <- rbind(results_df, benchmark_df)
 nr_prediction_methods = length(unique(results_df$prediction_method))
 nr_tests = nrow(results_df)/nr_prediction_methods
+print(paste("Number of prediction methods: ", nr_prediction_methods))
+print(paste("Number of tests: ", nr_tests))
 #results_df <- readRDS("output/performance_comparison.rds")
 
 results_df_small <- results_df |> filter(realization <= 1000)
+results_df |> filter(is.finite(rel_error)) |> filter(rel_error==max(rel_error))
 #results_df <- results_df |> mutate(prediction_method = if_else(str_starts(prediction_method, "DP"), "product", prediction_method))
 
 # results_df <- get_simulation_group_files(rel_dev=TRUE) |> load_files() |> combine_simulation_results()

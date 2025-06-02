@@ -14,8 +14,8 @@ summ_fun <- get_three_quantiles_summarizing_function()$f
 # Example partioning metric
 
 ```{r}
-study <- studies[[4]]
-test_question_id <- 1
+study <- studies[[45]]
+test_question_id <- 11
 test_set <- study |> filter(question_id == test_question_id)
 training_set <- study |> filter(question_id != test_question_id)
 test_m_matrix <- test_set |> study_df_single_question_to_summary_matrix(summ_fun, k_percentiles)
@@ -47,6 +47,37 @@ plot(x,exp(y))
 s <- sample_log_unnormalized_density(res$posterior$logDM, res$posterior$support, 1000)
 ```
 ```{r}
+f <- approxfun(x, exp(y), yleft=0, yright=0)
+area <- integrate(f, res$posterior$support[1], res$posterior$support[2], subdivisions = 10^15)
+f_normalized <- function(x) f(x) / area$value
+cumulative_probability <- function(x) integrate(f_normalized, res$posterior$support[1], x, subdivisions = 10000)$value
+
+uniroot(\(x) cumulative_probability(x) - 0.5, interval=res$posterior$support)$root
+# find median of the posterior
+```
+
+```{r}
+bayesian_setup <- BayesianTools::createBayesianSetup(res$posterior$logDM, lower=res$posterior$support[1], upper=res$posterior$support[2])
+
+middle_support = (res$posterior$support[1] + res$posterior$support[2]) / 2
+start_values <- runif(1000, min=res$posterior$support[1], max=res$posterior$support[2]) 
+# log linearly spaced values
+start_values <- exp(seq(log(res$posterior$support[1]), log(res$posterior$support[2]), length.out = 200))
+
+start_values <- c(95, 95)
+
+bay_settings <- list(iterations=5000, startValue=matrix(start_values, nrow=length(start_values), ncol=1)) # (support[1]+support[2])/2)
+bayesian_tools_samples <- BayesianTools::runMCMC(bayesian_setup, sampler="DEzs", settings=bay_settings)
+s2 <- bayesian_tools_samples$Z
+```
+```{r}
+density(s2) |> plot()
+```
+
+
+```{r}
+median(s2)
+mean(s2)
 median(s)
 plot(density(s))
 ```
