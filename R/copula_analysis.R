@@ -1644,7 +1644,7 @@ study_test_performance <- function(study_data, sim_params = NULL) {
     } else if (p$prediction_method == "density_product") {
       res <- posterior_product_predictor(
         df_format_to_array_format(training_set, test_set, p$summarizing_function$f, p$k_percentiles)$test_summaries,
-        overshoot = p$overshoot,
+        overshoot = p$q_support_overshoot,
         k_percentiles = p$k_percentiles,
         q_support_restriction = p$q_support_restriction
       )
@@ -1664,9 +1664,9 @@ study_test_performance <- function(study_data, sim_params = NULL) {
     } else if (p$prediction_method == "equal_weights") {
       posterior <- equal_weight_predict(test_matrix)
     } else if (p$prediction_method == "classical_global_opt") {
-      posterior <- global_opt_weight_predict(training_array, training_realizations, test_matrix, p$overshoot, p$support_restriction)
+      posterior <- global_opt_weight_predict(training_array, training_realizations, test_matrix, p$q_support_overshoot, p$q_support_restriction)
     } else if (p$prediction_method == "uniform") {
-      posterior <- uniform_prediction_posterior(test_matrix, p$overshoot, p$support_restriction)
+      posterior <- uniform_prediction_posterior(test_matrix, p$q_support_overshoot, p$q_support_restriction)
     }
     else {
       stop(glue::glue("Unknown prediction method: {p$prediction_method}"))

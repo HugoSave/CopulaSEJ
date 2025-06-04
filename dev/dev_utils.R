@@ -155,3 +155,33 @@ run_analysis_per_study <- function(study_list, simulation_params = NULL) {
   list(results = dplyr::bind_rows(results),
        warnings = warnings)
 }
+
+remove_high_magintude_difference <- function(studies, max_mag_ratio=100) {
+  studies_filtered <- lapply(studies, function(study) {
+    study_ranges <- study |> mutate(expert_range = `95th percentile` -`5th percentile`)
+    filtered_questions <- study_ranges |> group_by(question_id) |>
+      mutate(range_mag_diff = max(expert_range) / min(expert_range)) |> ungroup() |> filter(range_mag_diff < max_mag_ratio)
+    return(filtered_questions)
+  })
+  return(studies_filtered)
+}
+
+find_high_magnitude_differences <- function(studies, max_mag_ratio = 100) {
+  to_remove <- lapply(studies, function(study) {
+    study_id_val <- unique(study$study_id)
+
+    study_ranges <- study %>%
+      mutate(expert_range = `95th percentile` - `5th percentile`) %>%
+      group_by(question_id) %>%
+      mutate(range_mag_diff = max(expert_range) / min(expert_range)) %>%
+      ungroup() %>%
+      filter(range_mag_diff >= max_mag_ratio) %>%
+      distinct(question_id) %>%
+      mutate(study_id = study_id_val)
+
+    return(study_ranges %>% select(study_id, question_id))
+  })
+
+  # Combine all the to-be-removed entries into a single tibble
+  bind_rows(to_remove)
+}

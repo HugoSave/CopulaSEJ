@@ -88,7 +88,6 @@ abs_values
 ```
 ```{r, fig.width=10}
 
-
 results_df_small |> filter(realization!=0 & prediction!=0) |> mutate(realization=abs(realization), prediction=abs(prediction)) |> 
   ggplot(aes(realization, prediction, color=prediction_method)) +
   geom_point() +
@@ -139,10 +138,26 @@ relative_erros_boxplot <- results_df |> filter(realization != 0 & abs(rel_error)
   labs(x = "method",
        y = "Relative Error") +
   theme_minimal() +
+  ylim(-10, 10) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
-ggsave("output/relative_erros_boxplot.png", relative_erros_violins, width=10)
+ggsave("output/relative_erros_boxplot.png", relative_erros_boxplot, width=10)
 relative_erros_boxplot 
 ```
+```{r}
+# plot the emperical ecdf of the cum_prob  
+results_df |> ggplot(aes(x = cum_prob)) +
+  stat_ecdf(geom = "step") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black") +
+  facet_wrap(~ prediction_method) +
+  labs(
+    title = "Empirical CDF of cum_prob by Prediction Method",
+    x = "Cumulative Probability",
+    y = "Empirical CDF"
+  ) +
+  theme_minimal()
+```
+
+
 ```{r}
 # some plot that per study shows the prediction of a specific method
 

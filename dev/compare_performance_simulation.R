@@ -202,7 +202,6 @@ run_study_find_posterior <- function(studies, params, sim_group="tmp"){
 
 sample_and_add_metrics <- function(analys_res) {
 
-  browser()
   df <- analys_res$results
   list_of_metrics <- purrr::pmap(list(df$posterior, df$realization, df$sample_prior), \(post, realization, sample_prior) {
     if (!is.list(post)) {
@@ -236,7 +235,7 @@ run_benchmarking_methods <- function() {
   #studies <- filter_studies_few_questions(studies, min_questions=11)
   studies <- filter_study_remove_ids(studies, study_ids=7)
 
-  data_list_short <-studies[1]
+  data_list_short <-studies
   param_list <- list()
 
   param_list <- push_list(param_list,
