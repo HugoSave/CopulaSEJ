@@ -17,7 +17,9 @@ fit_and_construct_posterior_indep(
   rejection_threshold = NULL,
   rejection_min_experts = 3,
   rejection_test = "distance_correlation",
-  connection_threshold = NULL
+  connection_threshold = NULL,
+  connection_metric = "kendall",
+  recover_numerical_failure = FALSE
 )
 }
 \arguments{

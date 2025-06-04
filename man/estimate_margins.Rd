@@ -10,7 +10,10 @@ estimate_margins(
   method = "beta",
   overshoot = 0.1,
   out_of_boundary = "clamp",
-  bw = "SJ"
+  bw = "SJ",
+  beta_mean = 0.5,
+  beta_var = 1/12,
+  prior_std = 0.1
 )
 }
 \arguments{

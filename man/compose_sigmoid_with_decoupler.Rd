@@ -6,9 +6,9 @@
 \usage{
 compose_sigmoid_with_decoupler(
   decoupler,
-  sigmoid,
-  sigmoid_prime,
-  sigmoid_inverse
+  sigmoid_f,
+  sigmoid_prime_f,
+  sigmoid_inverse_f
 )
 }
 \arguments{

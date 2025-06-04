@@ -17,7 +17,7 @@ summ_fun <- get_three_quantiles_summarizing_function()$f
 
 ```{r}
 study <- studies[[45]]
-test_question_id <- 10
+test_question_id <- 11
 test_set <- study |> filter(question_id == test_question_id)
 training_set <- study |> filter(question_id != test_question_id)
 test_m_matrix <- test_set |> study_df_single_question_to_summary_matrix(summ_fun, k_percentiles)
@@ -68,6 +68,10 @@ prior_sample_experts_mixtures <- function(n, expert_beliefs) {
 }
 ```
 
+
+```{r}
+```
+
 ```{r}
 bayesian_setup <- BayesianTools::createBayesianSetup(res$posterior$logDM, lower=res$posterior$support[1], upper=res$posterior$support[2])
 # bayesian_setup <- BayesianTools::createBayesianSetup(res$posterior$logDM, prior=logunif_prior)
@@ -82,7 +86,7 @@ bayesian_setup <- BayesianTools::createBayesianSetup(res$posterior$logDM, lower=
 start_values <- prior_sample_experts_mixtures(10, dists)
 Z <- prior_sample_experts_mixtures(50, dists)
 
-bay_settings <- list(iterations=10000, Z=matrix(Z, nrow=length(Z), ncol=1), startValue=matrix(start_values, nrow=length(start_values), ncol=1)) # (support[1]+support[2])/2)
+bay_settings <- list(iterations=5000, Z=matrix(Z, nrow=length(Z), ncol=1), startValue=matrix(start_values, nrow=length(start_values), ncol=1)) # (support[1]+support[2])/2)
 #bay_settings <- list(iterations=10000, burnin=1000, startValue=4)
 #bay_settings <- list(iterations=5000, burnin=1000) # (support[1]+support[2])/2)
 bayesian_tools_samples <- BayesianTools::runMCMC(bayesian_setup, sampler="DEzs", settings=bay_settings)
@@ -90,8 +94,22 @@ s2_alt <- BayesianTools::getSample(bayesian_tools_samples)[,1]
 s2 <- bayesian_tools_samples$Z
 ```
 ```{r}
+bay_settings <- list(iterations=10000, Z=matrix(Z, nrow=length(Z), ncol=1), startValue=matrix(start_values, nrow=length(start_values), ncol=1)) # (support[1]+support[2])/2)
+
+
+```
+
+```{r}
 summary(s2_alt)
 ```
+```{r}
+arms_samples <- armspp::arms(5000, res$posterior$logDM, lower=res$posterior$support[1], upper=res$posterior$support[2], initial=sort(start_values), n_initial=210, max_points = 500)
+```
+
+```{r}
+summary(arms_samples)
+```
+
 ```{r}
 summary(s2)
 ```

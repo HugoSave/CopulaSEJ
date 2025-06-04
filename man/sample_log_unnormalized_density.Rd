@@ -9,7 +9,8 @@ sample_log_unnormalized_density(
   support,
   num_samples,
   start_point = NULL,
-  method = "BayesianTools"
+  method = "BayesianTools",
+  sample_prior = NULL
 )
 }
 \arguments{

@@ -235,7 +235,7 @@ run_benchmarking_methods <- function() {
   #studies <- filter_studies_few_questions(studies, min_questions=11)
   studies <- filter_study_remove_ids(studies, study_ids=7)
 
-  data_list_short <-studies
+  data_list_short <- studies
   param_list <- list()
 
   param_list <- push_list(param_list,
@@ -291,7 +291,6 @@ run_performance_test <- function() {
   devtools::load_all(".")
   source("dev/dev_utils.R")
 
-  file_name <- "dev/output/data49_nov24.rds"
   studies <- load_data_49(relative_dev_folder = FALSE)
   studies <- filter_study_remove_ids(studies, study_ids=7)
 
@@ -380,7 +379,6 @@ run_performance_test <- function() {
                                recover_numerical_failure = TRUE
                              )
                            ))
-
 
   result_list <- purrr::map(param_list, \(x) {
     analys_res <- run_study_find_posterior(data_list_short, x, "main")

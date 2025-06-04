@@ -1,7 +1,7 @@
 # file for producing estimates from log unnormalized posteriors
 
-performance_metrics_list <- function(mean=NA, median=NA, neg_log_lik=NA, post_neg_log_lik=NA, sd=NA, cum_prob=cum_prob) {
-  return(list(mean=mean, median=median, neg_log_lik=neg_log_lik, post_neg_log_lik=post_neg_log_lik, sd=sd, cum_prob=cum_prob))
+performance_metrics_list <- function(mean=NA, median=NA, neg_log_lik=NA, post_neg_log_lik=NA, sd=NA, cum_prob=NA) {
+  return(list(mean=mean, median=median, neg_log_lik=neg_log_lik, post_neg_log_lik=post_neg_log_lik, sd=sd, cum_prob=NA))
 }
 
 # compute simultaneous because they share the same samples
@@ -84,7 +84,7 @@ sample_log_unnormalized_density <- function(log_density, support, num_samples, s
 
     bay_settings <- list(iterations=num_samples, Z=matrix(Z, length(Z), ncol=1), startValue=matrix(starting_values, nrow=length(starting_values), ncol=1))
     bayesian_tools_samples <- BayesianTools::runMCMC(bayesian_setup, sampler="DEzs", settings=bay_settings)
-    bayesian_tools_samples$Z
+    BayesianTools::getSample(bayesian_tools_samples)[,1]
   }
   else{
     armspp::arms(num_samples, log_density, support[1] , support[2])

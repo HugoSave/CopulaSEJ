@@ -4,7 +4,7 @@
 \alias{get_mean_summarizing_function}
 \title{Title}
 \usage{
-get_mean_summarizing_function()
+get_mean_summarizing_function(support_restriction = NULL, overshoot = 0.1)
 }
 \description{
 Title

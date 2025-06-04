@@ -4,7 +4,15 @@
 \alias{new_distribution}
 \title{Distribution object}
 \usage{
-new_distribution(cdf, pdf, support, sample = NULL, cdf_inv = NULL)
+new_distribution(
+  cdf,
+  pdf,
+  support,
+  sample = NULL,
+  cdf_inv = NULL,
+  mean = NULL,
+  median = NULL
+)
 }
 \arguments{
 \item{cdf, pdf, cdf_inv}{of the distribution}

@@ -145,7 +145,7 @@ relative_erros_boxplot
 ```
 ```{r}
 # plot the emperical ecdf of the cum_prob  
-results_df |> ggplot(aes(x = cum_prob)) +
+results_df |> filter(cum_prob != 1 & cum_prob != 0) |> ggplot(aes(x = cum_prob)) +
   stat_ecdf(geom = "step") +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black") +
   facet_wrap(~ prediction_method) +

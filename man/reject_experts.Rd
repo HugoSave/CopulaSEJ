@@ -5,7 +5,7 @@
 \title{Title}
 \usage{
 reject_experts(
-  training_estimates,
+  training_assessments,
   training_realizations,
   rejection_level = 0.1,
   test = "kruskal",
@@ -14,8 +14,6 @@ reject_experts(
 )
 }
 \arguments{
-\item{training_estimates}{QxExD array with the training data.}
-
 \item{training_realizations}{Q long vector with the realizations of the training data.}
 
 \item{rejection_level}{numeric value between 0 and 1. The level of rejection.}
@@ -26,6 +24,15 @@ reject_experts(
 
 \item{min_nr_experts}{minimum number of experts to accept. If the number of
 accepted experts is less than this value, the best experts are selected based on p-values.}
+
+\item{training_estimates}{QxExD array with the training data.}
+}
+\value{
+A list with the following elements:
+\itemize{
+\item accepted_estimates: a Qx\tilde{E}xD array with the accepted estimates
+\item p_values: a vector with the p-values for each expert
+}
 }
 \description{
 Title
