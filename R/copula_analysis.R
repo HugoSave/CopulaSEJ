@@ -1033,6 +1033,17 @@ ideal_means_vars_non_finite_to_uniform <- function(means_vars, supports) {
   means_vars
 }
 
+construct_equal_weight_sample_prior <- function(test_matrix, cum_probabilities=c(0.05,0.5,0.95), overshoot=0.1, support_restriction=NULL) {
+  expert_beliefs <- linear_distribution_interpolation_matrix_w_overshoot(test_matrix, cum_probabilities, overshoot = overshoot, support_restriction=support_restriction)
+  prior_sample_experts_mixtures <- function(n) {
+    # sample from the dists
+    samples <- purrr::map(expert_beliefs, \(x) x$sample(n))
+    # return a single vector of samples
+    unlist(samples)
+  }
+  return(prior_sample_experts_mixtures)
+}
+
 #' Title
 #'
 #' @param training_estimates
@@ -1141,7 +1152,7 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
                                                margin_distributions,
                                                decoupler,
                                                test_matrix,
-                                               support=target_q_support)
+                                               support=widend_support)
   ret <- list(
     posterior = posterior,
     warning = warning,
@@ -1560,7 +1571,8 @@ study_test_performance <- function(study_data, sim_params = NULL) {
     test_question = vector(mode = "numeric"),
     posterior = list(),
     accepted_experts = vector(mode = "numeric"),
-    experts = vector(mode = "numeric")
+    experts = vector(mode = "numeric"),
+    sample_prior = list()
   )
   warnings <- c()
   single_expert_warning <- FALSE
@@ -1669,6 +1681,7 @@ study_test_performance <- function(study_data, sim_params = NULL) {
     stats$posterior[[i]] <- posterior
     stats$accepted_experts[[i]] <- nr_experts
     stats$experts[[i]] <- total_nr_experts
+    stats$sample_prior[[i]] <- construct_equal_weight_sample_prior(test_matrix, overshoot = p$q_support_overshoot, support_restriction = p$q_support_restriction)
   }
 
   # convert to tibble

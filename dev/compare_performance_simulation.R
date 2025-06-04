@@ -1,3 +1,4 @@
+
 copula_shortname <- function(copula_family) {
   # Create a short name for the copula model
   if (copula_family == "vine") {
@@ -6,6 +7,8 @@ copula_shortname <- function(copula_family) {
     return("In")
   } else if (copula_family == "frank") {
     return("Fr")
+  } else if (copula_family == "hierarchical") {
+    return("Hi")
   } else {
     return(copula_family)
   }
@@ -69,15 +72,42 @@ connection_threshold_shortname <- function(connection_threshold) {
   }
 }
 
+beta_std_shortname <- function(error_estimation_settings) {
+  if (is.null(error_estimation_settings) || is.null(error_estimation_settings$prior_std)) {
+    return("")
+  } else {
+    return(glue::glue("BS({error_estimation_settings$prior_std})"))
+  }
+}
+
 
 parameter_shortname <- function(sim_params, sep="") {
   method = sim_params$prediction_method
-  # no parameter methods
-  if (method %in% c("density_product", "uniform", "median_average", "equal_weights", "classical_global_opt")) {
+
+  # For copula method, use copula model name instead of prediction method
+  if (method == "copula") {
+    # Build name components for copula method
+    components <- c(
+      copula_shortname(sim_params$copula_model),
+      sim_params$error_metric$short_name,
+      sim_params$summarizing_function$short_name,
+      rejection_shortname(sim_params$rejection_test,
+                          sim_params$rejection_threshold,
+                          sim_params$rejection_min_experts),
+      connection_threshold_shortname(sim_params$connection_threshold),
+      beta_std_shortname(sim_params$error_estimation_settings)
+    )
+    # Remove empty components
+    components <- components[components != ""]
+    return(paste(components, collapse = sep))
+  }
+  # For non-parameter methods (no copula involved)
+  else if (method %in% c("density_product", "uniform", "median_average", "equal_weights", "classical_global_opt")) {
     return(prediction_method_shortname(method))
   }
+  # For other methods that might use parameters
   else {
-    paste(
+    components <- c(
       prediction_method_shortname(sim_params$prediction_method),
       copula_shortname(sim_params$copula_model),
       sim_params$error_metric$short_name,
@@ -86,8 +116,11 @@ parameter_shortname <- function(sim_params, sep="") {
                           sim_params$rejection_threshold,
                           sim_params$rejection_min_experts),
       connection_threshold_shortname(sim_params$connection_threshold),
-      sep=sep
+      beta_std_shortname(sim_params$error_estimation_settings)
     )
+    # Remove empty components
+    components <- components[components != ""]
+    return(paste(components, collapse = sep))
   }
 }
 
@@ -168,12 +201,14 @@ run_study_find_posterior <- function(studies, params, sim_group="tmp"){
 }
 
 sample_and_add_metrics <- function(analys_res) {
+
+  browser()
   df <- analys_res$results
-  list_of_metrics <- purrr::pmap(list(df$posterior, df$realization), \(post, realization) {
+  list_of_metrics <- purrr::pmap(list(df$posterior, df$realization, df$sample_prior), \(post, realization, sample_prior) {
     if (!is.list(post)) {
       return(performance_metrics_list()) # defaults to NA for all other metrics
     } else {
-      return(posterior_performance_metrics(post$logDM, post$support, realization, num_samples=5000, mean_value=post$mean, median_value=post$median))
+      return(posterior_performance_metrics(post$logDM, post$support, realization, num_samples=5000, mean_value=post$mean, median_value=post$median, sample_prior = sample_prior))
     }
   })
 
@@ -193,12 +228,10 @@ push_list <- function(list, item) {
 }
 
 run_benchmarking_methods <- function() {
-  library(devtools)
-  load_all(".")
+  devtools::load_all(".")
   source("dev/dev_utils.R")
 
   file_name <- "dev/output/data49_nov24.rds"
-  numerical_col_names <- c(k_percentiles_to_colname(c(5, 50, 95)), "realization")
   studies <- load_data_49(relative_dev_folder = FALSE)
   #studies <- filter_studies_few_questions(studies, min_questions=11)
   studies <- filter_study_remove_ids(studies, study_ids=7)
@@ -256,11 +289,10 @@ run_benchmarking_methods <- function() {
 
 run_performance_test <- function() {
   library(devtools)
-  load_all(".")
+  devtools::load_all(".")
   source("dev/dev_utils.R")
 
   file_name <- "dev/output/data49_nov24.rds"
-  numerical_col_names <- c(k_percentiles_to_colname(c(5, 50, 95)), "realization")
   studies <- load_data_49(relative_dev_folder = FALSE)
   studies <- filter_study_remove_ids(studies, study_ids=7)
 

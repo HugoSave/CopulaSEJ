@@ -16,9 +16,9 @@ library(CopulaSEJ)
 source("dev_utils.R")
 
 #file_name <- "output/data49_nov24.rds"
-#studies <- readRDS(file_name)
-#studies <- filter_studies_few_questions(studies, min_questions=10)
-#studies <- filter_study_remove_ids(studies, study_ids=7) 
+studies <- load_data_49(relative_dev_folder = TRUE)
+id_high_mag <- find_high_magnitude_differences(studies, max_mag_ratio = 1000)
+id_high_mag  <- id_high_mag |> rename(test_question=question_id)
 #
 #percentile_names <- k_percentiles_to_colname(c(5, 50, 95))
 #
@@ -47,6 +47,7 @@ print(paste("Number of tests: ", nr_tests))
 #results_df <- readRDS("output/performance_comparison.rds")
 
 results_df_small <- results_df |> filter(realization <= 1000)
+results_df_small <- results_df |> anti_join(id_high_mag, by=c("study_id", "test_question"))
 results_df |> filter(is.finite(rel_error)) |> filter(rel_error==max(rel_error))
 #results_df <- results_df |> mutate(prediction_method = if_else(str_starts(prediction_method, "DP"), "product", prediction_method))
 
@@ -262,7 +263,7 @@ error_metrics_per_test <- results_df |> filter(realization!=0 & abs(rel_error) <
   summarise(MAPE = mean(abs(rel_error)), MedAPE = median(abs(rel_error)), RMSPE = mean(rel_error^2), MAXPE = max(abs(rel_error)), .groups="drop")
 
 # check the number of times each prediction method performed the best
-best_prediction_method_per_study <- error_metrics_per_study |> 
+best_prediction_method_per_study <- error_metrics_per_test |> 
   group_by(study_id, test_question) |> 
   summarise(MAPE = prediction_method[which.min(MAPE)], 
             MedAPE = prediction_method[which.min(MedAPE)],

@@ -1,31 +1,34 @@
 # file for producing estimates from log unnormalized posteriors
 
-posterior_to_mean <- function(log_unnormalized_posterior, support, num_samples=1000) {
-  samples <- sample_log_unnormalized_density(log_unnormalized_posterior, support, num_samples)
-  mean(samples)
-}
-
-performance_metrics_list <- function(mean=NA, median=NA, neg_log_lik=NA, post_neg_log_lik=NA, sd=NA) {
-  return(list(mean=mean, median=median, neg_log_lik=neg_log_lik, post_neg_log_lik=post_neg_log_lik, sd=sd))
+performance_metrics_list <- function(mean=NA, median=NA, neg_log_lik=NA, post_neg_log_lik=NA, sd=NA, cum_prob=cum_prob) {
+  return(list(mean=mean, median=median, neg_log_lik=neg_log_lik, post_neg_log_lik=post_neg_log_lik, sd=sd, cum_prob=cum_prob))
 }
 
 # compute simultaneous because they share the same samples
-posterior_performance_metrics <- function(log_unnormalized_posterior, support, true_value, num_samples=1000, mean_value=NULL, median_value=NULL) {
-  if (is.null(mean_value) || is.null(median_value)) {
-    samples <- sample_log_unnormalized_density(log_unnormalized_posterior, support, num_samples)
-    mean_value <- if(is.null(mean_value)) mean(samples) else mean_value
-    median_value <- if(is.null(median_value)) median(samples) else median_value
-    sd_value = sd(samples)
+posterior_performance_metrics <- function(log_unnormalized_posterior, support, true_value, num_samples=1000, mean_value=NULL, median_value=NULL, sample_prior=NULL) {
+  #if (is.null(mean_value) || is.null(median_value)) {
 
-    d <- density(samples)
-    likelihood <- approx(d$x, d$y, xout=true_value, method="linear", yleft =0, yright=0)$y
-    neg_log_like <- -log(likelihood)
-  } else {
-    sd_value = NA
-    neg_log_like <- NA
-  }
+  samples <- sample_log_unnormalized_density(log_unnormalized_posterior, support, num_samples, sample_prior=sample_prior)
+  mean_value <- if(is.null(mean_value)) mean(samples) else mean_value
+  median_value <- if(is.null(median_value)) median(samples) else median_value
+  sd_value = sd(samples)
+  # get what percentile true_value is in
+  cum_prob <- ecdf(samples)(true_value)
 
-  post_neg_log_lik <- -log_unnormalized_posterior(true_value) # should be the same as looking at the samples but I don't think it is.
+
+
+  d <- density(samples)
+  likelihood <- approx(d$x, d$y, xout=true_value, method="linear", yleft =0, yright=0)$y
+  neg_log_like <- -log(likelihood)
+
+
+  #} else {
+  #  sd_value = NA
+  #  neg_log_like <- NA
+  #}
+
+  # is unnormalized so not really useful but potentially interesting
+  post_neg_log_lik <- -log_unnormalized_posterior(true_value)
 
   #f <- approxfun(d$x, d$y, yleft=0, yright=0)
 
@@ -43,7 +46,7 @@ posterior_performance_metrics <- function(log_unnormalized_posterior, support, t
   #   }
   # )
 
-  return(performance_metrics_list( mean=mean_value, median=median_value, neg_log_lik=neg_log_like, post_neg_log_lik=post_neg_log_lik, sd=sd_value))
+  return(performance_metrics_list( mean=mean_value, median=median_value, neg_log_lik=neg_log_like, post_neg_log_lik=post_neg_log_lik, sd=sd_value, cum_prob=cum_prob))
 }
 
 
@@ -58,7 +61,7 @@ posterior_performance_metrics <- function(log_unnormalized_posterior, support, t
 #' @export
 #'
 #' @examples
-sample_log_unnormalized_density <- function(log_density, support, num_samples, start_point=NULL, method="BayesianTools") {
+sample_log_unnormalized_density <- function(log_density, support, num_samples, start_point=NULL, method="BayesianTools", sample_prior=NULL) {
   #MCMCpack::MCMCmetrop1R(log_density, (support[1] + support[2])/2, mcmc=num_samples)$batch
   #as.vector(mcmc::metrop(log_density, (support[1] + support[2])/2, num_samples)$batch)
   if (is.infinite(support[1]) || is.infinite(support[2])) {
@@ -68,8 +71,18 @@ sample_log_unnormalized_density <- function(log_density, support, num_samples, s
   }  else if (method=="BayesianTools") {
     bayesian_setup <- BayesianTools::createBayesianSetup(log_density, lower=support[1], upper=support[2])
 
-    starting_values <- get_starting_values(support, N=round(num_samples/5), max_width_for_uniform = 1000)
-    bay_settings <- list(iterations=num_samples, startValue=matrix(starting_values, nrow=length(starting_values), ncol=1))
+    if (!is.null(sample_prior)) {
+      # if we have a prior, we can use it to get starting values
+      checkmate::assert_function(sample_prior)
+      starting_values <- sample_prior(50)
+      Z <- sample_prior(100)
+    } else {
+      # otherwise, we use the support to get starting values
+      starting_values <- get_starting_values(support, N=50, max_width_for_uniform = 1000)
+      Z <- get_starting_values(100)
+    }
+
+    bay_settings <- list(iterations=num_samples, Z=matrix(Z, length(Z), ncol=1), startValue=matrix(starting_values, nrow=length(starting_values), ncol=1))
     bayesian_tools_samples <- BayesianTools::runMCMC(bayesian_setup, sampler="DEzs", settings=bay_settings)
     bayesian_tools_samples$Z
   }

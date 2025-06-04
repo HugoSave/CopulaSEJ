@@ -1,0 +1,161 @@
+---
+title: "error_dependence_test"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(patchwork)
+library(copula)
+library(scales)
+library(energy)
+library(knitr)
+library(CopulaSEJ)
+
+source("dev_utils.R")
+
+data_list_form <- load_data_49()[1:2]
+
+
+```
+For every study we would want to calculate some error metric for each question. Then calculate the dCov between the error metric and the question. 
+```{r}
+# run_error_dependence_simulation(output_file="output/dcors_df.rds")
+dcors_df = readRDS("output/dcors_df.rds")
+dcors_df = readRDS(deocupler_test_output_file_name(
+  reject_experts=TRUE,
+  rejection_threshold=0.05,
+  date=Sys.Date(),
+  rel_dev=TRUE
+))
+
+dcors_df$name = paste0(dcors_df$m, ":", dcors_df$decoupler)
+dcors_df$T_stat = purrr::map_dbl(dcors_df$dcor_T_test, \(x) if (identical(x, NA)) NA else  x$statistic)
+dcors_df$nu = dcors_df$nr_questions * (dcors_df$nr_questions - 3)/2
+dcors_df$approx_normal = sqrt(dcors_df$nu-1) * dcors_df$dcorT
+```
+```{r}
+y25 = qnorm(0.25)
+y50 = qnorm(0.5)
+y75 = qnorm(0.75)
+
+normal_stats <- data.frame(
+  x = "Standard Normal",
+  y0 = y25 - 1.5 * (y75 - y25),
+  y25 = y25,
+  y50 = y50,
+  y75 = y75,
+  y100 = y75 + 1.5 * (y75 - y25)
+)
+
+p <- dcors_df |> filter(!is.na(approx_normal)) |> 
+  ggplot(aes(x=name, y=approx_normal)) + geom_boxplot()  + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+   geom_boxplot(
+   aes(x=x, ymin = y0, lower = y25, middle = 0, upper = y75, ymax = y100),
+   data=normal_stats,
+   stat = "identity",
+   inherit.aes = FALSE
+ ) + labs(x=NULL, y =parse(text="sqrt(nu-1)(paste(R,'*'))"))
+approx_normal_filename <- if (reject_experts) "approx_normal_reject_experts.png" else "approx_normal.png"
+ggsave(glue::glue("output/{approx_normal_filename}"), p, width=10, height=5)
+p
+```
+```{r}
+dcors_df$dcor_corrected=  dcors_df$dcor_T_test |> map_dbl(\(x) {
+   if (identical(x, NA)){
+     return(NA)
+   }
+   x$estimate}
+   )
+
+nr_not_na = dcors_df |> group_by(name) |> summarize(nr_na=is.na(dcorT) %>% sum(), nr_not_na = (!is.na(dcorT)) %>% sum())
+
+# |> map_if(\(x) x$estimate)
+p <- dcors_df |> filter(!is.na(dcorT)) |> ggplot(aes(x=name, y=dcorT)) + geom_boxplot()  + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab(NULL)  + theme(plot.margin = margin(20, 10, 10, 20)) 
+# save plot
+
+# add the number of studies with not na values as text label
+p <- p + geom_text(data=nr_not_na, aes(x=name, y=1.1, label=nr_not_na), vjust=0, hjust=0.4) +  coord_cartesian(ylim = c(-0.5, 0.99), clip = 'off') 
+
+ggsave("Output/dcor_corrected.png", p, width=10, height=5)
+p
+```
+```{r}
+# find the indices 
+# study 46 has some negative bias corrected dcor
+dcors_df$dcor_T_test[c(226, 229)]
+
+```
+```{r}
+extract_summarizing_function <- Vectorize(function(name_str) {
+  # write a vectorized version of below
+  if (str_starts(name_str, "median")) {
+    summarising_func = "Md"
+  } else if (str_starts(name_str, "three quantiles")) {
+    summarising_func = "3Q"
+  } else if (str_starts(name_str, "mean(global)")) {
+    summarising_func = "MeG"
+  }
+  else {
+    stop("Name must start with median or 3 quantiles")
+  }
+  return(summarising_func)
+})
+extract_error_metric <- function(name_str) {
+  error_metric = str_extract(name_str, ":(.*)")
+  # remove and
+  return(str_remove(error_metric, "and "))
+}
+nr_studies = length(unique(dcors_df$study_id))
+# get the t test p values for the corrected dcor
+a = dcors_df |> filter(!is.na(dcorT)) |> rowwise() |> mutate(dcor_T_p_value = dcor_T_test$p.value)
+
+# a = a |> mutate("Summarizing function" = extract_summarizing_function(name), "Error metric" =extract_error_metric(name)) |> 
+#   group_by(study_id, `Summarizing function`) |> mutate("Best in study"=if_else(dcorT == min(dcorT), T,F)) |> ungroup()
+a = a  |> group_by(study_id) |> #, D, D_tilde) |> 
+  mutate("Best in study"=if_else(p_value_T == max(p_value_T), T,F)) |> ungroup()
+# plot histogram of p value
+a |> filter(!is.nan(dcor_T_p_value)) |> ggplot(aes(x=dcor_T_p_value)) + geom_histogram(bins=20)
+# for each name get the percentage of p values less than 0.05
+table = a |> filter(!is.nan(dcor_T_p_value)) |> group_by(m, decoupler) |> summarize("H_0 Rejected (% of studies)" = paste(round(mean(dcor_T_p_value < 0.05)*100), "%", sep=""),
+ `Highest p value (% of studies)`=str_glue("{round(100*sum(`Best in study`)/nr_studies, digits=0)}%"),
+ #`Highest p value (nr of studies)`=sum(`Best in study`),
+ D=unique(D),
+ D_tilde=unique(D_tilde),
+ avg_nr_experts_rejected = round(mean(nr_experts_rejected), digits=1)
+ )
+# sort table
+table = table |> arrange(desc(D), desc(D_tilde), m)
+# print as latex table
+table_latex = table |> kable("latex", format.args = list(digits=2))
+table
+```
+```{r}
+dcors_df$nr_experts_rejected |> summary()
+dcors_df$E |> summary()
+```
+
+```{r}
+# look for each study which one has the lowset cor value
+dcors_df |> filter(!is.na(dcor_corrected)) |> group_by(study_id) |> summarize(min_dcor_corrected = min(dcor_corrected), method = name[which.min(dcor_corrected)]) |> count(method)
+```
+
+```{r}
+# select names that start with '3'
+dcors_df |> filter(!is.na(dcor_corrected)& str_starts(name, "3")) |> group_by(study_id) |> summarize(min_dcor_corrected = min(dcor_corrected), method = name[which.min(dcor_corrected)]) |> count(method)
+dcors_df |> filter(!is.na(dcor_corrected)& str_starts(name, "median")) |> group_by(study_id) |> summarize(min_dcor_corrected = min(dcor_corrected), method = name[which.min(dcor_corrected)]) |> count(method)
+```
+```{r}
+# looking at studies with positive values
+study_id_with_negatives = dcors_df |> filter(name == "3 quantiles and log(q/m)" & !is.na(dcor_corrected)) |> select(study_id) |> unique()
+study_id_with_negatives
+```
+```{r}
+# Only 14 studies with non negative quantiles and estimates
+```
+
+```{r}
+
+```
+

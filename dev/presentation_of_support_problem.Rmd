@@ -5,9 +5,11 @@ output: html_document
 
 ```{r}
 #library(CopulaSEJ)
+library(mixtools)
 devtools::load_all("../")
 source("dev_utils.R")
 studies <- load_data_49_filtered(relative_dev_folder = TRUE)
+studies <- load_data_49(relative_dev_folder = TRUE)
 k_percentiles <- c(5,50,95)
 summ_fun <- get_three_quantiles_summarizing_function()$f
 ```
@@ -15,7 +17,7 @@ summ_fun <- get_three_quantiles_summarizing_function()$f
 
 ```{r}
 study <- studies[[45]]
-test_question_id <- 11
+test_question_id <- 10
 test_set <- study |> filter(question_id == test_question_id)
 training_set <- study |> filter(question_id != test_question_id)
 test_m_matrix <- test_set |> study_df_single_question_to_summary_matrix(summ_fun, k_percentiles)
@@ -44,7 +46,8 @@ res <- fit_and_construct_posterior_indep(
 x <- seq(res$posterior$support[1], res$posterior$support[2], length.out = 1000)
 y <- res$posterior$logDM(x)
 plot(x,exp(y))
-s <- sample_log_unnormalized_density(res$posterior$logDM, res$posterior$support, 1000)
+s <- sample_log_unnormalized_density(res$posterior$logDM, res$posterior$support, 10000)
+median(s)
 ```
 ```{r}
 f <- approxfun(x, exp(y), yleft=0, yright=0)
@@ -55,28 +58,47 @@ cumulative_probability <- function(x) integrate(f_normalized, res$posterior$supp
 uniroot(\(x) cumulative_probability(x) - 0.5, interval=res$posterior$support)$root
 # find median of the posterior
 ```
+```{r}
+dists <- linear_distribution_interpolation_matrix_w_overshoot(test_m_matrix, c(0.05,0.5,0.95))
+prior_sample_experts_mixtures <- function(n, expert_beliefs) {
+  # sample from the dists
+  samples <- purrr::map(expert_beliefs, \(x) x$sample(n))
+  # return a single vector of samples
+  unlist(samples)
+}
+```
 
 ```{r}
 bayesian_setup <- BayesianTools::createBayesianSetup(res$posterior$logDM, lower=res$posterior$support[1], upper=res$posterior$support[2])
+# bayesian_setup <- BayesianTools::createBayesianSetup(res$posterior$logDM, prior=logunif_prior)
+# 
+# middle_support = (res$posterior$support[1] + res$posterior$support[2]) / 2
+# start_values <- runif(1000, min=res$posterior$support[1], max=res$posterior$support[2]) 
+# # log linearly spaced values
+# start_values <- exp(seq(log(res$posterior$support[1]), log(res$posterior$support[2]), length.out = 200))
+# 
+# start_values <- get_starting_values(res$posterior$support, N=10, max_width_for_uniform = 1000)
+# Z <- get_starting_values(res$posterior$support, N=1000, max_width_for_uniform = 1000)
+start_values <- prior_sample_experts_mixtures(10, dists)
+Z <- prior_sample_experts_mixtures(50, dists)
 
-middle_support = (res$posterior$support[1] + res$posterior$support[2]) / 2
-start_values <- runif(1000, min=res$posterior$support[1], max=res$posterior$support[2]) 
-# log linearly spaced values
-start_values <- exp(seq(log(res$posterior$support[1]), log(res$posterior$support[2]), length.out = 200))
-
-start_values <- c(95, 95)
-
-bay_settings <- list(iterations=5000, startValue=matrix(start_values, nrow=length(start_values), ncol=1)) # (support[1]+support[2])/2)
+bay_settings <- list(iterations=10000, Z=matrix(Z, nrow=length(Z), ncol=1), startValue=matrix(start_values, nrow=length(start_values), ncol=1)) # (support[1]+support[2])/2)
+#bay_settings <- list(iterations=10000, burnin=1000, startValue=4)
+#bay_settings <- list(iterations=5000, burnin=1000) # (support[1]+support[2])/2)
 bayesian_tools_samples <- BayesianTools::runMCMC(bayesian_setup, sampler="DEzs", settings=bay_settings)
+s2_alt <- BayesianTools::getSample(bayesian_tools_samples)[,1]
 s2 <- bayesian_tools_samples$Z
 ```
 ```{r}
-density(s2) |> plot()
+summary(s2_alt)
+```
+```{r}
+summary(s2)
 ```
 
-
 ```{r}
-median(s2)
+median(s2_alt)
+quantile(s2, 0.0)
 mean(s2)
 median(s)
 plot(density(s))

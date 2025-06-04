@@ -117,6 +117,11 @@ mean_of_linear_distribution <- function(x, cdf_values) {
   sum(diff(cdf_values) * x_lag_sum)/2
 }
 
+linear_distribution_interpolation_matrix_w_overshoot <- function(x_matrix, cdf_values, overshoot=0.1, support_restriction=NULL) {
+  quantiles <- add_0_and_100_percentiles_matrix(x_matrix, overshoot=overshoot, support_restriction=support_restriction)
+  linear_distribution_interpolation_matrix(quantiles, c(0,cdf_values,1)) # E long
+}
+
 linear_distribution_interpolation_matrix <- function(x_matrix, cdf_values) {
   # Linear interpolation for the CDF
   apply(x_matrix, 1, linear_distribution_interpolation, cdf_values=cdf_values)
