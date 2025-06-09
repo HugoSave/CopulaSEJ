@@ -1,7 +1,12 @@
 library(CopulaSEJ)
 library(dplyr)
 library(energy)
-source("dev/dev_utils.R")
+# try to source the dev_utils.R file otherwise dev/dev_utils.R
+if (file.exists("dev_utils.R")) {
+  source("dev_utils.R")
+} else {
+  source("dev/dev_utils.R")
+}
 
 calculate_decoupler_values <- function(study_data, m_func, decoupler_f, k_percentiles=c(5,50,95), flattened=TRUE) {
   if (nrow(study_data) == 0) {
@@ -30,17 +35,16 @@ metric_list <- list(
   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_E", short_name="Linear_MnE")),
   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_G", short_name="Linear_MnG")),
   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "median", short_name="Linear_Md")),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(D_tilde = 3, compose_sigmoid = FALSE, short_name="Relative")),
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_linear_decoupler(D_tilde = 3, compose_sigmoid = FALSE, m_preprocess = NULL, short_name="Linear_3Q")),
+  #list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(D_tilde = 3, compose_sigmoid = FALSE, short_name="Relative")),
   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_E", short_name="Relative_MnE")),
   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_G", short_name="Relative_MnG")),
   list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "median", short_name="Relative_Md")),
-  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_support_ratio_decoupler(global_support = TRUE))
-  #list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(D_tilde = 3, compose_sigmoid = FALSE, short_name="Ratio")),
-  #list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "median", short_name="Ratio_Md")),
-  #list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_E", short_name="Ratio_MnE")),
-  #list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_ratio_decoupler(D_tilde = 1, compose_sigmoid = FALSE, m_preprocess = "mean_G", short_name="Ratio_MnG"))
-  # list(m=CopulaSEJ:::get_mean_summarizing_function(unified_support=TRUE), decoupler=CopulaSEJ:::get_sigmoid_linear_decoupler()),
-  # list(m=CopulaSEJ:::get_mean_summarizing_function(unified_support=TRUE), decoupler=CopulaSEJ:::get_sigmoid_ratio_decoupler())
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_relative_decoupler(D_tilde = 3, compose_sigmoid = FALSE, m_preprocess = NULL, short_name="Relative_3Q")),
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_scaled_linear_decoupler(point_estimate = "mean_G")),
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_scaled_linear_decoupler(point_estimate = "mean_E")),
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_scaled_linear_decoupler(point_estimate = "median")),
+  list(m=CopulaSEJ:::get_three_quantiles_summarizing_function(), decoupler=CopulaSEJ:::get_scaled_linear_decoupler(point_estimate = "3Q"))
 )
 
 # metric_list <- list(
@@ -164,15 +168,15 @@ decoupler_test_output_file_name <- function(
 
 # run if not interactive
 if (!interactive()) {
-  reject_experts = FALSE
+  reject_experts = TRUE
+  #reject_experts = FALSE
   rejection_threshold = 0.05
   rejection_test = "distance_correlation"
   rej_expert_str <- ifelse(reject_experts, paste0("RejE(", rejection_threshold, ")"), "noR")
   output_file= decoupler_test_output_file_name(reject_experts, rejection_threshold, Sys.Date(), rel_dev = FALSE)
 
   min_nr_experts = 1
-  studies <- load_data_49(relative_dev_folder=FALSE)
-  studies <- filter_study_remove_ids(studies, 7)
+  studies <- load_data_47(relative_dev_folder=FALSE)
   run_decoupler_summarizer_dependence_analysis(
     studies,
     metric_list,

@@ -13,7 +13,7 @@ library(energy)
 library(knitr)
 library(CopulaSEJ)
 
-source("dev_utils.R")
+source("compare_decoupler_dependence_simulation.R")
 
 data_list_form <- load_data_49()[1:2]
 
@@ -26,12 +26,14 @@ For every study we would want to calculate some error metric for each question. 
 dcors_df_rejection = readRDS(decoupler_test_output_file_name(
   reject_experts=T,# F,
   rejection_threshold=0.05,
+  #date="2025-05-22",
   date=Sys.Date(),
   rel_dev=TRUE
 ))
 
 dcors_df_noRej = readRDS(decoupler_test_output_file_name(
   reject_experts=F,# F,
+  #date="2025-05-22",
   date=Sys.Date(),
   rel_dev=TRUE
 ))
@@ -70,29 +72,25 @@ get_assymptotic_dependency_plot <- function(df) {
    data=normal_stats,
    stat = "identity",
    inherit.aes = FALSE
- ) + labs(x=NULL, y =parse(text="sqrt(nu-1)(paste(R,'*'))"))
+ ) + labs(x=NULL, y =parse(text="sqrt(nu-1)(paste(R,'*'))")) +
+       scale_fill_discrete(name="Rejection", labels=c("No", "Yes")) 
 }
+
 
 assymptotic_p <- get_assymptotic_dependency_plot(dcors_df)
 #assymptotic_p <- get_assymptotic_dependency_plot(dcors_df_noRej)
 #assymptotic_rejection_p <- get_assymptotic_dependency_plot(dcors_df_rejection)
-approx_normal_filename <- "approx_normal_depdenency.png"
+approx_normal_filename <- "approx_normal_dependency.png"
 ggsave(glue::glue("output/{approx_normal_filename}"), assymptotic_p, width=10, height=5)
 assymptotic_p
 ```
 
 ```{r}
-dcors_df$dcor_corrected = dcors_df$dcor_T_test |> map_dbl(\(x) {
-   if (identical(x, NA)){
-     return(NA)
-   }
-   x$estimate}
-   )
 
-nr_not_na = dcors_df |> group_by(name) |> summarize(nr_na=is.na(dcorT) %>% sum(), nr_not_na = (!is.na(dcorT_Q)) %>% sum())
+nr_not_na = dcors_df |> group_by(name) |> summarize(nr_na=is.na(dcorT_Q) %>% sum(), nr_not_na = (!is.na(dcorT_Q)) %>% sum())
 
 # |> map_if(\(x) x$estimate)
-p <- dcors_df |> filter(!is.na(dcorT)) |> ggplot(aes(x=name, y=dcorT)) + geom_boxplot()  + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab(NULL)  + theme(plot.margin = margin(20, 10, 10, 20)) 
+p <- dcors_df |> ggplot(aes(x=name, y=dcorT_Q)) + geom_boxplot()  + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab(NULL)  + theme(plot.margin = margin(20, 10, 10, 20)) 
 # save plot
 
 # add the number of studies with not na values as text label
@@ -100,12 +98,6 @@ p <- p + geom_text(data=nr_not_na, aes(x=name, y=1.1, label=nr_not_na), vjust=0,
 
 ggsave("Output/dcor_corrected.png", p, width=10, height=5)
 p
-```
-```{r}
-# find the indices 
-# study 46 has some negative bias corrected dcor
-dcors_df$dcor_T_test[c(226, 229)]
-
 ```
 ```{r}
 extract_summarizing_function <- Vectorize(function(name_str) {
@@ -130,7 +122,7 @@ extract_error_metric <- function(name_str) {
 
 nr_studies = length(unique(dcors_df$study_id))
 create_dependency_rejection_table <- function(df) {
-  a = df |> filter(!is.na(p_value_Q)) |> filter(D_tilde==1) |> mutate(dcor_T_p_value = p_value_Q)
+  a = df |> filter(!is.na(p_value_Q)) |> mutate(dcor_T_p_value = p_value_Q)
   
   # a = a |> mutate("Summarizing function" = extract_summarizing_function(name), "Error metric" =extract_error_metric(name)) |> 
   #   group_by(study_id, `Summarizing function`) |> mutate("Best in study"=if_else(dcorT == min(dcorT), T,F)) |> ungroup()
@@ -139,10 +131,10 @@ create_dependency_rejection_table <- function(df) {
   
   # for each name get the percentage of p values less than 0.05
   table = a |> filter(!is.nan(dcor_T_p_value)) |> group_by(decoupler) |> summarize(
+      D=unique(D_tilde),
     "H_0 Rejected (% of studies)" = paste(round(mean(dcor_T_p_value < 0.05)*100), "%", sep=""),
    `Highest p value (% of studies)`=str_glue("{round(100*sum(`Best in study`)/nr_studies, digits=0)}%"),
    #D=unique(D),
-   #D_tilde=unique(D_tilde),
    avg_nr_experts_rejected = round(mean(nr_experts_rejected), digits=1)
    )
   
@@ -150,37 +142,18 @@ create_dependency_rejection_table <- function(df) {
   table #= table |> arrange(desc(D), desc(D_tilde))
   
 }
+# do separate for each D value
+table_1D_rej = create_dependency_rejection_table(dcors_df_rejection |> filter(D_tilde==1))
+table_3D_rej = create_dependency_rejection_table(dcors_df_rejection |> filter(D_tilde==3))
+table_1D_No_rej = create_dependency_rejection_table(dcors_df_noRej |> filter(D_tilde==1))
+table_3D_No_rej = create_dependency_rejection_table(dcors_df_noRej  |> filter(D_tilde==3))
+# save_to_csv_files
+table_rej = dplyr::bind_rows(table_3D_rej, table_1D_rej)
+table_no_rej = dplyr::bind_rows(table_3D_No_rej, table_1D_No_rej)
+table_rej |> readr::write_csv("output/dcor_rejection.csv")
+table_no_rej |> readr::write_csv("output/dcor_no_rejection.csv")
 # get the t test p values for the corrected dcor
 # print as latex table
-table_rejection = create_dependency_rejection_table(dcors_df_rejection)
 table_latex = table |> kable("latex", format.args = list(digits=2))
-table_rejection
-```
-```{r}
-dcors_df$nr_experts_rejected |> summary()
-dcors_df$E |> summary()
-```
-
-```{r}
-# look for each study which one has the lowset cor value
-dcors_df |> filter(!is.na(dcor_corrected)) |> group_by(study_id) |> summarize(min_dcor_corrected = min(dcor_corrected), method = name[which.min(dcor_corrected)]) |> count(method)
-```
-
-```{r}
-# select names that start with '3'
-dcors_df |> filter(!is.na(dcor_corrected)& str_starts(name, "3")) |> group_by(study_id) |> summarize(min_dcor_corrected = min(dcor_corrected), method = name[which.min(dcor_corrected)]) |> count(method)
-dcors_df |> filter(!is.na(dcor_corrected)& str_starts(name, "median")) |> group_by(study_id) |> summarize(min_dcor_corrected = min(dcor_corrected), method = name[which.min(dcor_corrected)]) |> count(method)
-```
-```{r}
-# looking at studies with positive values
-study_id_with_negatives = dcors_df |> filter(name == "3 quantiles and log(q/m)" & !is.na(dcor_corrected)) |> select(study_id) |> unique()
-study_id_with_negatives
-```
-```{r}
-# Only 14 studies with non negative quantiles and estimates
-```
-
-```{r}
-
 ```
 

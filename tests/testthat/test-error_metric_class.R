@@ -155,7 +155,7 @@ test_that("sigmoid_composed_affine_decoupler_ideal_mean_var works", {
 })
 
 
-test_that("support_ratio_decoupler is correct", {
+test_that("scaled_linear_decoupler is correct", {
   E = 2
   m = matrix(
     c(1,2,3,
@@ -167,7 +167,7 @@ test_that("support_ratio_decoupler is correct", {
       0.6, 2, 3, 5, 5.4), nrow=2, ncol=5, byrow=TRUE)
 
   estimated_means <- estimate_mean_from_quantiles(m_exteneded, c(0.05,0.5, 0.95))
-  decoupler <- get_support_ratio_decoupler(overshoot=0.1)
+  decoupler <- get_scaled_linear_decoupler(overshoot=0.1)
   q_test <- c(0, 3)
   width=4.8
   expected_output_q1 <- matrix(

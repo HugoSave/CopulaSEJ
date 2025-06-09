@@ -1,5 +1,6 @@
 library(CopulaSEJ)
 library(energy)
+library(goftest)
 
 load_data_49 <- function(relative_dev_folder=TRUE) {
   if (relative_dev_folder) {
@@ -8,6 +9,51 @@ load_data_49 <- function(relative_dev_folder=TRUE) {
     studies <- readRDS("dev/output/data49_nov24.rds")
   }
   studies
+}
+
+calculate_uniformity_metrics <- function(cum_probs) {
+  stopifnot(all(cum_probs >= 0 & cum_probs <= 1))
+  # Get the empirical CDF values
+  cvm_test <- cvm.test(cum_probs, null="punif")
+  cvm_statistic <- cvm_test$statistic # n times L_{2norm}^2
+
+  ecdf_f <- ecdf(cum_probs)
+  sorted_cumprobs <- knots(ecdf_f)
+  distances = abs(ecdf_f(sorted_cumprobs) - punif(sorted_cumprobs, 0, 1))
+
+  x_fine = seq(0, 1, length.out = length(cum_probs) * 1000)
+  dx = 1/(length(x_fine) - 1)
+  y_values_unif = punif(x_fine, 0, 1)
+  y_values_emp = ecdf_f(x_fine)
+  y_diffs = abs(y_values_emp - y_values_unif)
+  L1 = sum(y_diffs) * dx
+  L2 = sqrt(sum((y_values_emp - y_values_unif)^2) * dx)
+
+
+  # calculate the L1 distance to the uniform distribution
+  dx_values = diff(c(sorted_cumprobs, 1))
+  y_values_unif = punif(sorted_cumprobs, 0, 1)
+  y_values_emp = ecdf_f(sorted_cumprobs)
+  y_diffs = abs(y_values_emp - y_values_unif)
+
+
+
+  return(
+    list(
+      cvm_statistic = cvm_statistic,
+      max_distance = max(distances),
+      avg_distance = mean(distances),
+      L1=L1,
+      L2 = sqrt(cvm_statistic / length(cum_probs)),
+      p_value = cvm_test$p.value,
+      CalGap = -log10(cvm_test$p.value)
+    )
+  )
+}
+
+load_data_47 <- function(relative_dev_folder=TRUE) {
+  studies <- load_data_49(relative_dev_folder)
+  studies |> filter_study_remove_ids(c(7,48))
 }
 
 load_data_49_filtered <- function(relative_dev_folder=TRUE) {

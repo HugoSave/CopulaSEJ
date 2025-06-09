@@ -723,7 +723,6 @@ estimate_margin_beta <- function(obs_vec, support=NULL, overshoot=0.1, out_of_bo
   min_obs <- min(obs_vec)
   max_obs <- max(obs_vec)
 
-  browser()
   if (is.null(support)) {
     obs_width <- max_obs - min_obs
     support <- c(min_obs - overshoot * obs_width, max_obs + overshoot * obs_width)

@@ -53,11 +53,11 @@ decoupler_margin_estimation_settings_to_shortname <- function(settings) {
 
 decoupler_and_margin_estimation_settings_study <- function() {
   decouplers <- list(
-    get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k=1.5),
-    get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k=1),
-    get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k=0.5),
+    #get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="median", k=1.5),
+    get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="median", k=1),
+    get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="median", k=0.5),
     #get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k=0.5),
-    get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k=0.1),
+    get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="median", k=0.1),
     #get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k=0.05),
     #get_relative_decoupler(D_tilde=1, compose_sigmoid = TRUE, m_preprocess="mean_G", k=0.01),
     get_CDF_decoupler()
@@ -68,36 +68,36 @@ decoupler_and_margin_estimation_settings_study <- function() {
         prior_std=1,
         out_of_boundary="discard"
       ),
-    #  list(
-    #    method="beta_MAP",
-    #    prior_std=0.5,
-    #    out_of_boundary="discard"
-    #  ),
-    #  list(
-    #    method="beta_MAP",
-    #    prior_std=0.1,
-    #    out_of_boundary="discard"
-    #  ),
+      list(
+        method="beta_MAP",
+        prior_std=0.5,
+        out_of_boundary="discard"
+      ),
+      list(
+        method="beta_MAP",
+        prior_std=0.1,
+        out_of_boundary="discard"
+      ),
     #  list(
     #    method="beta_MAP",
     #    prior_std=0.05,
     #    out_of_boundary="discard"
     #  ),
-    # list(
-    #   method="beta_MAP",
-    #   prior_std=0.01,
-    #    out_of_boundary="discard"
-    # ),
+     list(
+       method="beta_MAP",
+       prior_std=0.05,
+        out_of_boundary="discard"
+     ),
     #list(
     #  method="uniform"
     #),
     list(
       method="beta_MLE",
       out_of_boundary="discard"
-    )#,
-    #list(
-    #  method="beta_prior"
-    #)
+    ),
+    list(
+      method="beta_prior"
+    )
   )
   combinations <- tidyr::expand_grid(error_estimation_settings=error_estimation_settings_list, decoupler=decouplers )
   combinations
@@ -145,7 +145,8 @@ evalute_marginal_fit <-  function(study_data, decoupler, get_posterior_obj, k_pe
 run_decoupler_margin_comparison <- function() {
   library(devtools)
   devtools::load_all(".")
-  studies <- load_data_49(relative_dev_folder = FALSE) # |> filter_studies_few_questions(min_questions = 11)
+  options(mc.cores=parallel::detectCores()-1)
+  studies <- load_data_47(relative_dev_folder = FALSE) # |> filter_studies_few_questions(min_questions = 11)
   #studies <- filter_study_remove_ids(studies,7)
   settings <- decoupler_and_margin_estimation_settings_study()
   res <- compare_decoupler_margin_estimations(studies, settings)

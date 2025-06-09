@@ -1,0 +1,14 @@
+decoupler,D,H_0 Rejected (% of studies),Highest p value (% of studies),avg_nr_experts_rejected
+Linear_3Q,3,49%,17%,6.9
+Relative_3Q,3,4%,64%,2.2
+Sc.Lin.3Q,3,15%,19%,2.4
+CDF,1,11%,28%,2
+Linear_Md,1,38%,9%,5.1
+Linear_MnE,1,36%,4%,5.1
+Linear_MnG,1,34%,6%,4.9
+Relative_Md,1,11%,19%,2.3
+Relative_MnE,1,15%,9%,2.4
+Relative_MnG,1,11%,15%,2.4
+Sc.Lin.Md,1,15%,2%,2.2
+Sc.Lin.mu_E,1,15%,0%,2.1
+Sc.Lin.mu_G,1,13%,9%,2.1

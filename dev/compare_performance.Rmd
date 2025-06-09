@@ -32,14 +32,14 @@ id_high_mag  <- id_high_mag |> rename(test_question=question_id)
 
 #saveRDS(results_df, "dev/output/performance_comparison_new.rds")
 #results_df<-readRDS("output/performance_comparison_new.rds")
-results_df<-readRDS("output/compare_performance_simulation.rds")$results
-results_df <- results_df |> filter(prediction_method %in% c("CohierarchicalCDF3QNoRCT(0.7)", "CoInCDF3QNoRNoCT"))
-benchmark_df<-readRDS("output/benchmarking_methods_performance.rds")$results
+copula_method_df <-readRDS("output/compare_performance_simulation.rds")$results
+copula_method_df <- copula_method_df |> filter(prediction_method %in% c("CohierarchicalCDF3QNoRCT(0.7)", "CoInCDF3QNoRNoCT"))
+benchmark_df <- readRDS("output/benchmarking_methods_performance.rds")$results
 benchmark_df <- benchmark_df |> filter(study_id !=7) # remove study_id 7, not in the normal performance 
 
-stopifnot(nrow(results_df)/length(unique(results_df$prediction_method)) == nrow(benchmark_df)/length(unique(benchmark_df$prediction_method)))
+stopifnot(nrow(copula_method_df)/length(unique(copula_method_df$prediction_method)) == nrow(benchmark_df)/length(unique(benchmark_df$prediction_method)))
 
-results_df <- rbind(results_df, benchmark_df)
+results_df <- rbind(copula_method_df, benchmark_df)
 nr_prediction_methods = length(unique(results_df$prediction_method))
 nr_tests = nrow(results_df)/nr_prediction_methods
 print(paste("Number of prediction methods: ", nr_prediction_methods))
@@ -132,7 +132,7 @@ stopifnot(nr_0_realizations == nr_0_realizations_other)
 print(paste("Number of infinite relative errors: ", nr_0_realizations))
 
 
-relative_erros_boxplot <- results_df |> filter(realization != 0 & abs(rel_error) < 10 & study_id <= 20) |> #filter(!(prediction_method %in% c("copula"))) |>
+relative_erros_boxplot <- results_df |> filter(realization != 0 & abs(rel_error) < 10 & study_id <= 20) |> # filter(!(prediction_method %in% c("copula"))) |>
   ggplot(aes(prediction_method, rel_error)) +
   geom_boxplot() +
   labs(x = "method",
@@ -155,6 +155,20 @@ results_df |> filter(cum_prob != 1 & cum_prob != 0) |> ggplot(aes(x = cum_prob))
     y = "Empirical CDF"
   ) +
   theme_minimal()
+```
+```{r}
+methods_with_densities <- results_df |> filter(!is.na(cum_prob))
+
+# calculate the 
+uniformity_metrics <- methods_with_densities |> split(methods_with_densities$prediction_method) |>
+  purrr::map(\(df) {
+    metrics <- calculate_uniformity_metrics(df$cum_prob)
+    tibble::tibble_row(
+      prediction_method = unique(df$prediction_method),
+      !!!metrics
+    )
+  })  |> purrr::list_rbind()
+uniformity_metrics
 ```
 
 

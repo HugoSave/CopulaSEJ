@@ -235,7 +235,7 @@ run_benchmarking_methods <- function() {
   #studies <- filter_studies_few_questions(studies, min_questions=11)
   studies <- filter_study_remove_ids(studies, study_ids=7)
 
-  data_list_short <- studies
+  data_list_short <- studies[1]
   param_list <- list()
 
   param_list <- push_list(param_list,

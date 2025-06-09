@@ -1067,46 +1067,97 @@ compose_decoupler_m_preprocessing <- function(process_m, decoupler, name, short_
 }
 
 
-get_support_ratio_decoupler <- function(global_support=TRUE, quantile_probs=c(0.05,0.5,0.95), overshoot=0.1, support_restriction=NULL) {
-  linear_decoupler <- get_linear_decoupler(D_tilde=1)
-  ratio_decoupler <- get_ratio_decoupler(D_tilde=1)
+get_scaled_linear_decoupler <- function(point_estimate="mean_G", quantile_probs=c(0.05,0.5,0.95), overshoot=0.1, support_restriction=NULL) {
+  checkmate::assert_subset(
+    point_estimate,
+    c("mean_G", "mean_E", "median", "3Q"),
+    empty.ok = FALSE
+  )
+  D_tilde = if (point_estimate == "3Q") {
+    3
+  } else {
+    1
+  }
+  linear_decoupler <- get_linear_decoupler(D_tilde=D_tilde)
+  ratio_decoupler <- get_ratio_decoupler(D_tilde=D_tilde)
 
   get_supports_and_means <- function(m) {
     m <- typecheck_and_convert_matrix_vector(m, vector())
     stopifnot(ncol(m) == 3)
-    m_extended <- add_0_and_100_percentiles_matrix(m, overshoot=overshoot, support_restriction=support_restriction)
-    L_star <- m_extended[,1]
-    U_star <- m_extended[,ncol(m_extended)]
+    #m_extended <- add_0_and_100_percentiles_matrix(m, overshoot=overshoot, support_restriction=support_restriction)
+    m_extended_per_expert <- add_0_and_100_percentiles_matrix_per_row(m, overshoot=overshoot, support_restriction=support_restriction)
+    L_bound <- m_extended_per_expert[,1, drop=FALSE] # ensure that the lower bound is not below the mean
+    U_bound <- m_extended_per_expert[,ncol(m_extended_per_expert), drop=FALSE] # ensure that the upper bound is not above the mean
+    if (point_estimate == "median") {
+      estimates <- preprocess_m_to_median(m)
+    } else if (point_estimate == "mean_G") {
+      estimates <- m_mean_estimate(m, quantiles_probs = quantile_probs, support_restriction=support_restriction, global_support=TRUE, overshoot=overshoot)
+    } else if (point_estimate == "mean_E") {
+      estimates <- m_mean_estimate(m, quantiles_probs = quantile_probs, support_restriction=support_restriction, global_support=FALSE, overshoot=overshoot)
+    } else if (point_estimate == "3Q") {
+      estimates <- m
+    }
+    else {
+      stop(glue::glue("Unknown point estimate type: {point_estimate}"))
+    }
 
-    means <- estimate_mean_from_quantiles(m_extended, cdf_values=quantile_probs)
-    matrix(c(means, U_star-L_star), nrow=nrow(m_extended), ncol=2, dimnames = list(names(means), c("Mean", "Width")))
+    mat <- cbind(
+      estimates,
+      U_bound - L_bound # Nx1 matrix with lower bounds
+    ) # Nx(D+1) matrix with estimates and widths
+    rownames(mat) <- rownames(estimates)
+    if (is.null(colnames(estimates))) {
+      colnames(mat)[ncol(mat)] <-  "Width"
+    } else {
+      colnames(mat) <- c(colnames(estimates), "Width")
+    }
+    mat
   }
 
   f <- function(q, m) {
-    mean_errors <- linear_decoupler$f(q, m[,1, drop=FALSE]) # returns NxEx1
-    support_widths <- m[,2,drop=FALSE] # Ex1
-    support_widths <- array(support_widths, dim=c(length(q), nrow(support_widths), 1)) # NxEx1
+    D = ncol(m) - 1 # D
+    E = nrow(m) # number of experts
+    estimates = m[,1:D, drop=FALSE] # ExD
+    mean_errors <- linear_decoupler$f(q, estimates) # returns NxExD
+    N = dim(mean_errors)[1] # number of assessments
+    support_widths <- m[,D+1, drop=TRUE] # E
+    # extend widths to NxExD
+    support_widths <- array(support_widths, dim=c(E, D, N)) |> aperm(c(3,1,2)) # NxExD
     mean_errors/support_widths
   }
 
   f_prime_q <- function(q, m) {
-    ratio_decoupler$f_prime_q(q, m[,2])
+    D = ncol(m) - 1 # D
+    support_widths <- m[,D+1, drop=TRUE] # E
+    # extend widths to NxExD
+    support_widths <- array(support_widths, dim=c(E, D, N)) |> aperm(c(3,1,2)) # NxExD
+    1/ support_widths
   }
 
   f_increasing <- function(m) {
-    ratio_decoupler$f_increasing(m[,2])
+    D = ncol(m) - 1
+    matrix(TRUE, nrow=nrow(m), ncol=D)
   }
 
   f_inverse <- function(z, m) {
-    ratio_inverse <- ratio_decoupler$f_inverse(z, m[,2]) # for each z we get a Ex1 q values
-    ratio_inverse # NxEx1
-    # array of means
-    m_array <- array(m[,1], dim=c(nrow(m), length(z), 1)) |> aperm(c(2,1,3)) # NxEx1
-    ratio_inverse + m_array # invert of linear decoupler
+    D = ncol(m) - 1 # D
+    E = nrow(m) # number of experts
+    N = length(z) # number of assessments
+    # extend all components to matching dimensions
+    z = array(z, dim=c(length(z), E, D)) # NxExD
+
+    support_widths <- m[,D+1, drop=TRUE] # E
+    # extend widths to NxExD
+    support_widths <- array(support_widths, dim=c(E, D, N)) |> aperm(c(3,1,2)) # NxExD
+
+    estimates <- m[,1:D, drop=FALSE] # ExD
+    estimates <- array(estimates, dim=c(E, D, N)) |> aperm(c(3,1,2)) # NxExD
+
+    z * support_widths + estimates
   }
 
   tmp_decoupler <- new_decoupler(
-    name = "relative support tmp",
+    name = "scaled linear tmp",
     f=f,
     f_prime_q = f_prime_q,
     f_increasing = f_increasing,
@@ -1114,7 +1165,20 @@ get_support_ratio_decoupler <- function(global_support=TRUE, quantile_probs=c(0.
     D_tilde = 1
   )
 
-  compose_decoupler_m_preprocessing(get_supports_and_means, tmp_decoupler, "relative support", "(q-Mn_G)/W")
+  # create name as function of the point estimate type
+  if (point_estimate == "mean_G") {
+    point_estimate_name <- "mu_G"
+  } else if (point_estimate == "mean_E") {
+    point_estimate_name <- "mu_E"
+  } else if (point_estimate == "median") {
+    point_estimate_name <- "Md"
+  } else if (point_estimate == "3Q") {
+    point_estimate_name <- "3Q"
+  } else {
+    stop("Unknown point estimate type")
+  }
+
+  compose_decoupler_m_preprocessing(get_supports_and_means, tmp_decoupler, "scaled linear {point_estimate_name}", glue::glue("Sc.Lin.{point_estimate_name}"))
 }
 
 
