@@ -1064,7 +1064,7 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
                                            test_matrix,
                                            decoupler,
                                            copula_model = "joe",
-                                           vine_fit_settings = list(),
+                                           vine_fit_settings = list(recover_numerical_failure=TRUE),
                                            error_estimation_settings=list(),
                                            q_support_restriction=NULL,
                                            q_support_overshoot=0.1,
@@ -1072,8 +1072,8 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
                                            rejection_min_experts=3,
                                            rejection_test="distance_correlation",
                                            connection_threshold=NULL,
-                                           connection_metric="kendall",
-                                           recover_numerical_failure=FALSE) {
+                                           connection_metric="kendall"
+                                           ) {
   checkmate::assert_array(training_estimates, "numeric", d=3)
   checkmate::assert_numeric(training_realizations)
   checkmate::assert_matrix(test_matrix, "numeric")

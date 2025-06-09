@@ -12,17 +12,22 @@ library(purrr)
 margin_comparison_file <- "output/margin_estimation_comparison.rds"
 margin_comparisons <- readRDS(margin_comparison_file)
 margin_comparisons$comb <- interaction(margin_comparisons$settings, margin_comparisons$decoupler)
+nr_na <- margin_comparisons |> group_by(comb) |> summarise(nr_na = sum(is.na(likelihoods)), 
+  nr_total = n(), percentage_na = nr_na/nr_total) |> ungroup() |> arrange(desc(nr_na))
+nr_na
+```
+```{r}
+# filter na 
+margin_comparisons <- margin_comparisons |> filter(is.finite(likelihoods))
 split_by_setting <- margin_comparisons |> split(margin_comparisons$comb) 
 margin_settings_names <- split_by_setting |> map_chr(\(df) df$comb |> unique() |> as.character())
 
 margin_comparisons_CDF <- margin_comparisons |> filter(str_ends(comb, "CDF"))
-margin_comparisons_relative <- margin_comparisons |> filter(str_detect(comb, "Relative"))
-margin_comparisons_relative <- margin_comparisons_relative |> mutate(k=as.numeric(str_split_i(decoupler, ":", 2)))
-margin_comparisons_relative$k |> unique()
+margin_comparisons_relative <- margin_comparisons |> filter(str_detect(comb, "Rel."))
+margin_comparisons_relative <- margin_comparisons_relative |> dplyr::mutate(k=as.numeric(stringr::str_split_i(decoupler, "=", 2)))
+k_values <- margin_comparisons_relative$k |> unique()
 ```
-```{r}
-nrow(margin_comparisons_CDF)/(length(margin_settings_names) -1)
-```
+
 
 ```{r}
 
@@ -32,7 +37,7 @@ margin_comparisons |> filter(comb=="betaH:1.s((q-m)/(|m|+e))")
 
 margin_comparisons |>  filter(likelihoods<45)  |> ggplot2::ggplot(aes(x=comb, y=likelihoods)) +
   geom_boxplot() +
-  theme(axis.text.x = element_text(angle = 10, hjust = 1)) 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
 ```
 ```{r}
 margin_comparisons |> filter(is.finite(likelihoods)) |> group_by(comb) |> summarise(
@@ -44,14 +49,22 @@ margin_comparisons |> filter(is.finite(likelihoods)) |> group_by(comb) |> summar
 )
 ```
 ```{r}
+# function to make histogram_plot 
+make_histogram <- function(df) {
+  df |> ggplot(aes(x=cdf_values)) +
+  geom_histogram(boundary=0, binwidth=0.05) +
+  facet_wrap(vars(comb))
+}
 
 margin_comparisons |> ggplot(aes(x=cdf_values)) +
   geom_histogram(boundary=0, binwidth=0.05) +
   facet_wrap(vars(comb))
 
-margin_comparisons_CDF |> ggplot(aes(x=cdf_values)) +
+p_cdf_histogram <- margin_comparisons_CDF |> ggplot(aes(x=cdf_values)) +
   geom_histogram(boundary=0, binwidth=0.05) +
   facet_wrap(vars(comb))
+ggsave("output/marginal_comparisons_CDF_histogram.pdf", p_cdf_histogram, width=10, height=10)
+p_cdf_histogram
 
 ```
 ```{r}
@@ -73,20 +86,24 @@ plot_emperical_CDF_compaison_sigmoid <- function(df) {
 }
 
 margin_comparisons_CDF |> plot_emperical_CDF_compaison()
-margin_comparisons_relative |> filter(k==1.5) |> plot_emperical_CDF_compaison()
 margin_comparisons_relative |> filter(k==1) |> plot_emperical_CDF_compaison()
 margin_comparisons_relative |> filter(k==0.5) |> plot_emperical_CDF_compaison()
+```
+
+
+```{r}
+p_k_01 <- margin_comparisons_relative |> filter(k==0.1) |> plot_emperical_CDF_compaison()
+ggsave("output/marginal_comparisons_k_01.pdf", p_k_01, width=10, height=10)
+p_k_01
+```
+
+
+```{r}
 margin_comp_p <- margin_comparisons |> plot_emperical_CDF_compaison()
 ggsave("output/marginal_comparisons.pdf", margin_comp_p, width=10, height=10)
 margin_comp_p
+```
 
-```
-```{r}
-ecdfs <- split_by_setting |> purrr::map(\(df) {
-  ecdf(df$cdf_values)
-})
-plot(ecdfs[[1]])
-```
 ```{r}
 # Compute distance to uniform distribution
 # for each setting
@@ -104,12 +121,15 @@ distance_to_uniforms <- ecdfs |> purrr::map(\(emperical_cdf) {
   )
 }) |> purrr::list_transpose()
 
-# ks_tests <- split_by_setting |> purrr::map(\(df) {
-#   ks.test(df$cdf_values, y=punif)
-# })
-cvm_statistic <- split_by_setting |> purrr::map_dbl(\(df) {
-  cvm.test(df$cdf_values, null="punif")$statistic
-})
+
+
+marginal_est_metrics <- split_by_setting |>   purrr::map(\(df) {
+    metrics <- calculate_uniformity_metrics(df$cdf_values)
+    tibble::tibble_row(
+      prediction_method = unique(df$comb),
+      !!!metrics
+    )
+  })  |> purrr::list_rbind()
 
 # combine to a table
 marginal_table <- tibble(
