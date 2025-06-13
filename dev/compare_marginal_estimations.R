@@ -113,8 +113,7 @@ evalute_marginal_fit <-  function(study_data, decoupler, get_posterior_obj, k_pe
     safe_result <- get_post_safe(arr_format$training_summaries, arr_format$training_realizations, arr_format$test_summaries, decoupler=decoupler)
     test_question_id <- test_set$question_id |> unique()
     if (!is.null(safe_result$error)) {
-      browser()
-      message("Caught error in get_posterior_obj: ", safe_result$error$message, " for study_id: ", study_data$study_id |> unique(), " and question_id: ", test_set$question_id |> unique())
+      message("Caught error in get_posterior_obj: ", conditionMessage(safe_result$error), " for study_id: ", study_data$study_id |> unique(), " and question_id: ", test_set$question_id |> unique())
       return(tibble::tibble(
         likelihoods = NA,
         cdf_values = NA,

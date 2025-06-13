@@ -8,6 +8,7 @@ library(ggplot2)
 library(tidyverse)
 library(goftest)
 library(purrr)
+source("dev_utils.R")
 
 margin_comparison_file <- "output/margin_estimation_comparison.rds"
 margin_comparisons <- readRDS(margin_comparison_file)
@@ -19,6 +20,30 @@ nr_na
 ```{r}
 # filter na 
 margin_comparisons <- margin_comparisons |> filter(is.finite(likelihoods))
+margin_comparisons$sigma <- margin_comparisons$settings |> stringr::str_split_i(":", 2) |> as.numeric()
+
+```
+
+```{r}
+# add 
+margin_comparisons <- margin_comparisons |>  mutate(sigma_label = case_when(
+    settings == "MLE" ~ "'MLE'",
+    settings == "beta_prior" ~ "'P.E. prior'",
+    TRUE ~ paste("sigma[prior]", "==", sigma)
+  ))
+# Get unique sigma values and sort them
+sigma_values <- unique(margin_comparisons$sigma[margin_comparisons$settings != "MLE" & margin_comparisons$settings != "beta_prior"])
+sigma_values <- sort(sigma_values)
+
+# Create the ordered levels
+sigma_expressions <- sapply(sigma_values, function(x)  paste("sigma[prior]", "==", x))
+desired_order <- c("'P.E. prior'", sigma_expressions, "'MLE'")
+
+# Convert to factor with desired order
+margin_comparisons$sigma_label <- factor(margin_comparisons$sigma_label, levels = desired_order)
+```
+
+```{r}
 split_by_setting <- margin_comparisons |> split(margin_comparisons$comb) 
 margin_settings_names <- split_by_setting |> map_chr(\(df) df$comb |> unique() |> as.character())
 
@@ -30,44 +55,26 @@ k_values <- margin_comparisons_relative$k |> unique()
 
 
 ```{r}
-
-
-
-margin_comparisons |> filter(comb=="betaH:1.s((q-m)/(|m|+e))") 
-
-margin_comparisons |>  filter(likelihoods<45)  |> ggplot2::ggplot(aes(x=comb, y=likelihoods)) +
-  geom_boxplot() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
-```
-```{r}
-margin_comparisons |> filter(is.finite(likelihoods)) |> group_by(comb) |> summarise(
-  mean_likelihoods=mean(likelihoods),
-  median_likelihoods=median(likelihoods),
-  sd_likelihoods=sd(likelihoods),
-  min_likelihoods=min(likelihoods),
-  max_likelihoods=max(likelihoods),
-)
-```
-```{r}
 # function to make histogram_plot 
 make_histogram <- function(df) {
   df |> ggplot(aes(x=cdf_values)) +
   geom_histogram(boundary=0, binwidth=0.05) +
-  facet_wrap(vars(comb))
+  facet_wrap(vars(sigma_label), labeller = label_parsed)
 }
 
-margin_comparisons |> ggplot(aes(x=cdf_values)) +
-  geom_histogram(boundary=0, binwidth=0.05) +
-  facet_wrap(vars(comb))
-
-p_cdf_histogram <- margin_comparisons_CDF |> ggplot(aes(x=cdf_values)) +
-  geom_histogram(boundary=0, binwidth=0.05) +
-  facet_wrap(vars(comb))
-ggsave("output/marginal_comparisons_CDF_histogram.pdf", p_cdf_histogram, width=10, height=10)
+p_cdf_histogram <- margin_comparisons_CDF |> make_histogram() 
+ggsave("output/marginal_comparisons_CDF_histogram.pdf", p_cdf_histogram, width=10, height=7)
 p_cdf_histogram
-
 ```
 ```{r}
+p_k_plots <- purrr::map(k_values, function(k_val) {
+  margin_comparisons_relative |> filter(k==k_val) |> make_histogram() 
+})
+# save plots
+purrr::walk(seq_along(p_k_plots), function(i) {
+  ggsave(paste0("output/marginal_comparisons_relative_k_", k_values[i], "_histogram.pdf"), p_k_plots[[i]], width=10, height=7)
+})
+p_k_plots[[1]]
 ```
 
 ```{r}
@@ -75,7 +82,7 @@ plot_emperical_CDF_compaison <- function(df) {
   ggplot(df, aes(x=cdf_values)) +
     stat_ecdf() +
     geom_abline(slope=1,intercept=0,linetype="dashed") + 
-    facet_wrap(vars(comb))
+    facet_wrap(vars(sigma_label), labeller = label_parsed)
 }
 
 plot_emperical_CDF_compaison_sigmoid <- function(df) {
@@ -85,16 +92,19 @@ plot_emperical_CDF_compaison_sigmoid <- function(df) {
     facet_grid(vars(decoupler), vars(k))
 }
 
-margin_comparisons_CDF |> plot_emperical_CDF_compaison()
-margin_comparisons_relative |> filter(k==1) |> plot_emperical_CDF_compaison()
-margin_comparisons_relative |> filter(k==0.5) |> plot_emperical_CDF_compaison()
+ecdf_cdf_plot <- margin_comparisons_CDF |> plot_emperical_CDF_compaison()
+ggsave("output/marginal_comparisons_CDF.pdf", ecdf_cdf_plot, width=10, height=7)
+ecdf_relative_plots <- purrr::map(k_values, \(k_val) margin_comparisons_relative |> filter(k==k_val) |> plot_emperical_CDF_compaison())
+
+purrr::walk(seq_along(ecdf_relative_plots), function(i) {
+  ggsave(paste0("output/marginal_comparisons_relative_k_", k_values[i], ".pdf"), ecdf_relative_plots[[i]], width=10, height=7)
+})
+ecdf_cdf_plot
 ```
 
 
 ```{r}
-p_k_01 <- margin_comparisons_relative |> filter(k==0.1) |> plot_emperical_CDF_compaison()
-ggsave("output/marginal_comparisons_k_01.pdf", p_k_01, width=10, height=10)
-p_k_01
+ecdf_relative_plots[[3]]
 ```
 
 
@@ -122,11 +132,12 @@ distance_to_uniforms <- ecdfs |> purrr::map(\(emperical_cdf) {
 }) |> purrr::list_transpose()
 
 
-
 marginal_est_metrics <- split_by_setting |>   purrr::map(\(df) {
     metrics <- calculate_uniformity_metrics(df$cdf_values)
     tibble::tibble_row(
       prediction_method = unique(df$comb),
+      decoupler = unique(df$decoupler),
+      settings = unique(df$settings),
       !!!metrics
     )
   })  |> purrr::list_rbind()
@@ -140,10 +151,43 @@ marginal_table <- tibble(
 )
 
 # get the 5 rows with lowest cvm_statistic
-marginal_table |> arrange(cvm_statistic) |> head(7)
-
+top_5_marginal_methods <- marginal_est_metrics |> arrange(L1) |> head(5)
+# save to csv
+write_csv(top_5_marginal_methods, "output/top_5_marginal_methods.csv")
+top_5_marginal_methods
 # cvm_tests |> purrr::map(\(test) { # This is not too informative because I have so many samples it gives really low p values.
 #   test$p.value
 # })
 ```
+```{r}
+top_10_L1 <- arrange(marginal_est_metrics, L1) |> head(10)
 
+top_10_L1
+```
+
+
+
+```{r}
+
+
+
+#margin_comparisons |> filter(comb=="betaH:1.s((q-m)/(|m|+e))") 
+make_likelihood_boxplots <- function(df) {
+  df |>  filter(likelihoods<10)  |> ggplot2::ggplot(aes(x=comb, y=likelihoods)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+}
+
+margin_comparisons_CDF |> make_likelihood_boxplots()
+margin_comparisons |> make_likelihood_boxplots()
+```
+```{r}
+margin_comparisons |> filter(is.finite(likelihoods)) |> group_by(comb) |> summarise(
+  mean_likelihoods=mean(likelihoods),
+  median_likelihoods=median(likelihoods),
+  sd_likelihoods=sd(likelihoods),
+  min_likelihoods=min(likelihoods),
+  max_likelihoods=max(likelihoods),
+  q_5 = quantile(likelihoods, 0.05)
+) |> arrange(q_5)
+```

@@ -114,6 +114,7 @@ extract_summarizing_function <- Vectorize(function(name_str) {
   }
   return(summarising_func)
 })
+
 extract_error_metric <- function(name_str) {
   error_metric = str_extract(name_str, ":(.*)")
   # remove and
