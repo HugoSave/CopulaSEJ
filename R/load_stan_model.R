@@ -20,6 +20,14 @@ load_stan_beta_model <- function(load_compiled = TRUE, precompiled_model_path = 
 
 }
 
+load_stan_beta_model_lognormal <- function(load_compiled = TRUE, precompiled_model_path = "beta_hiearchical_lognormal.rds", save_compiled=TRUE, save_compiled_path = "beta_hiearchical_lognormal.rds",
+                           force_compilation=FALSE) {
+  load_stan_model(load_precompiled=load_compiled, precompiled_model_path=precompiled_model_path,
+                  save_compiled=save_compiled, save_compiled_path=save_compiled_path,
+                  force_compilation=force_compilation, model_name="beta_hierarchical_lognormal")
+
+}
+
 load_stan_model <- function(load_precompiled = TRUE, precompiled_model_path = "beta_hiearchical.rds", save_compiled=TRUE, save_compiled_path = "beta_hiearchical.rds",
                            force_compilation=FALSE, model_name="beta_hierarchical") {
   model_file_names <- paste0(model_name, ".stan")

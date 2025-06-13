@@ -631,6 +631,56 @@ mean_variance_to_gamma_params <- function(mean, variance) {
   c(alpha, beta) # shape, rate
 }
 
+mode_variance_to_log_normal_params <- function(mode, variance, min_sigma=1+1e-6) {
+  # Define the function u^4 - u^3 - v/M^2 = 0
+  # where u = exp(sigma^2)
+  c_val <- variance / mode^2
+
+  root_function <- function(u) {
+    u^4 - u^3 - c_val
+  }
+
+  # For very small variance, use approximation
+  if (c_val < 1e-7) {
+    # When variance is very small, u ≈ 1 + c_val
+    u <- 1 + c_val
+  } else {
+
+    # Find the root using uniroot
+    # We know u > 1 for positive variance, so search in (1, 10)
+    # If that fails, expand the search range
+    tryCatch({
+      #root_result <- uniroot(root_function, interval = c(1.001, 10))
+      root_result <- uniroot(root_function, interval = c(1e-8, 10))
+      u <- root_result$root
+    }, error = function(e) {
+      # Try wider range if initial search fails
+      #root_result <- uniroot(root_function, interval = c(1.001, 100))
+      root_result <- uniroot(root_function, interval = c(1e-8, 100))
+      u <- root_result$root
+    })
+
+  }
+
+  # Calculate sigma^2 and mu
+  sigma_sq <- log(u)
+  if (sigma_sq  < min_sigma^2) {
+    sigma_sq   = min_sigma^2
+  }
+  mu <- log(mode) + sigma_sq
+
+
+  # Verify our solution by computing actual mode and variance
+  actual_mode <- exp(mu - sigma_sq)
+  # actual_variance <- exp(2*mu + sigma_sq) * (exp(sigma_sq) - 1)
+
+  list(
+    mu=mu,
+    sigma = sqrt(sigma_sq),
+    sigma_sq = sigma_sq
+  )
+}
+
 estimate_margin_beta_prior <- function(support, beta_mean, beta_var) {
   beta_vars <- mean_variance_to_beta_params(beta_mean, beta_var, support[1], support[2])
 
@@ -655,10 +705,9 @@ create_beta_dist_object <- function(a, b, support) {
   return(list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(a, b, support[1], support[2])))
 }
 
-estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_var=1/12, prior_std=0.1, clamp_epsilon=0.001, out_of_boundary="clamp") {
+estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_var=1/12, prior_std=0.1, clamp_epsilon=0.001, out_of_boundary="clamp", prior_form="lognormal") {
+  checkmate::assert_subset(prior_form, c("lognormal", "gamma"))
   beta_param_centers <- mean_variance_to_beta_params(beta_mean, beta_var, support[1], support[2]) # Wait I am doing this a bit wrong... Needs to be adjusted for the scaling
-  A_prior_params <- mean_variance_to_gamma_params(beta_param_centers[1], prior_std**2)
-  B_prior_params <- mean_variance_to_gamma_params(beta_param_centers[2], prior_std**2)
 
   support_width <- support[2] - support[1]
   # if (support_width != 1) {
@@ -681,19 +730,38 @@ estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_va
     stop(glue::glue("Unknown out_of_boundary strategy {out_of_boundary} for estimate_margin_beta_hiarch"))
   }
   #zero_to_one_obs <- (obs_vec - support[1])/support_width
-
-  model <- load_stan_beta_model()
   N = length(obs_vec)
-  data_list <- list(
-    N = N,
-    Z = obs_vec,
-    L=support[1],
-    U=support[2],
-    alpha_a = A_prior_params[1],
-    beta_a = A_prior_params[2],
-    alpha_b = B_prior_params[1],
-    beta_b = B_prior_params[2]
-  )
+
+  if (prior_form == "gamma") {
+    model <- load_stan_beta_model()
+    A_prior_params <- mean_variance_to_gamma_params(beta_param_centers[1], prior_std**2)
+    B_prior_params <- mean_variance_to_gamma_params(beta_param_centers[2], prior_std**2)
+    data_list <- list(
+      N = N,
+      Z = obs_vec,
+      L=support[1],
+      U=support[2],
+      alpha_a = A_prior_params[1],
+      beta_a = A_prior_params[2],
+      alpha_b = B_prior_params[1],
+      beta_b = B_prior_params[2]
+    )
+  } else if (prior_form == "lognormal") {
+    model <- load_stan_beta_model_lognormal()
+    A_prior_params <- mode_variance_to_log_normal_params(beta_param_centers[1], prior_std**2)
+    B_prior_params <- mode_variance_to_log_normal_params(beta_param_centers[2], prior_std**2)
+    data_list <- list(
+      N = N,
+      Z = obs_vec,
+      L=support[1],
+      U=support[2],
+      mu_a = A_prior_params$mu,
+      sigma_a = A_prior_params$sigma,
+      mu_b = B_prior_params$mu,
+      sigma_b  = B_prior_params$sigma
+    )
+  }
+
 
   fit_map <- rstan::optimizing(
     model,
