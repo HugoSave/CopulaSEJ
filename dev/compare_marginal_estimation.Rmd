@@ -66,6 +66,7 @@ p_cdf_histogram <- margin_comparisons_CDF |> make_histogram()
 ggsave("output/marginal_comparisons_CDF_histogram.pdf", p_cdf_histogram, width=10, height=7)
 p_cdf_histogram
 ```
+
 ```{r}
 p_k_plots <- purrr::map(k_values, function(k_val) {
   margin_comparisons_relative |> filter(k==k_val) |> make_histogram() 

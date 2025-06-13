@@ -5,7 +5,6 @@ output: html_document
 
 ```{r}
 #library(CopulaSEJ)
-library(mixtools)
 devtools::load_all("../")
 source("dev_utils.R")
 studies <- load_data_49_filtered(relative_dev_folder = TRUE)
@@ -16,7 +15,7 @@ summ_fun <- get_three_quantiles_summarizing_function()$f
 # Example partioning metric
 
 ```{r}
-study <- studies[[45]]
+study <- studies[[4]]
 test_question_id <- 11
 test_set <- study |> filter(question_id == test_question_id)
 training_set <- study |> filter(question_id != test_question_id)
@@ -33,7 +32,7 @@ res <- fit_and_construct_posterior_indep(
         cdf_metric,
         "indep",
         vine_fit_settings = list(eta=10),
-        error_estimation_settings = list(out_of_boundary="clamp", method="beta_MAP", prior_std=0.1),
+        error_estimation_settings = list(out_of_boundary="clamp", method="beta_MAP", prior_std=0.01),
         #error_estimation_settings = list(out_of_boundary="clamp", method="beta_MLE"),
         #error_estimation_settings = list(out_of_boundary="clamp", method="uniform", bw=1),
         q_support_restriction = NULL,
@@ -49,6 +48,10 @@ plot(x,exp(y))
 s <- sample_log_unnormalized_density(res$posterior$logDM, res$posterior$support, 10000)
 median(s)
 ```
+```{r}
+res$decoupler_margins |> plot_distributions()
+```
+
 ```{r}
 f <- approxfun(x, exp(y), yleft=0, yright=0)
 area <- integrate(f, res$posterior$support[1], res$posterior$support[2], subdivisions = 10^15)

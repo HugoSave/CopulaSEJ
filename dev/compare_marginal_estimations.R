@@ -65,17 +65,17 @@ decoupler_and_margin_estimation_settings_study <- function() {
   error_estimation_settings_list <- list(
        list(
          method="beta_MAP",
-         prior_std=1.5,
+         prior_std=0.75,
           out_of_boundary="discard"
        ),
       list(
         method="beta_MAP",
-        prior_std=1,
+        prior_std=0.5,
         out_of_boundary="discard"
       ),
       list(
         method="beta_MAP",
-        prior_std=0.5,
+        prior_std=0.25,
         out_of_boundary="discard"
       ),
       list(
@@ -144,7 +144,6 @@ evalute_marginal_fit <-  function(study_data, decoupler, get_posterior_obj, k_pe
   stats$study_id <- study_data$study_id |> unique()
   stats
 }
-
 
 run_decoupler_margin_comparison <- function() {
   library(devtools)

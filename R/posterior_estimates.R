@@ -41,11 +41,7 @@ posterior_performance_metrics <- function(log_unnormalized_posterior, support, t
 sample_log_unnormalized_density <- function(log_density, support, num_samples, start_point=NULL, method="BayesianTools", sample_prior=NULL) {
   #MCMCpack::MCMCmetrop1R(log_density, (support[1] + support[2])/2, mcmc=num_samples)$batch
   #as.vector(mcmc::metrop(log_density, (support[1] + support[2])/2, num_samples)$batch)
-  if (is.infinite(support[1]) || is.infinite(support[2])) {
-    stop("not yet implemented")
-    checkmate::expect_number(start_point)
-    mcmc::metrop(log_density, start_point, num_samples)$batch
-  }  else if (method=="BayesianTools") {
+  if (method=="BayesianTools") {
     bayesian_setup <- BayesianTools::createBayesianSetup(log_density, lower=support[1], upper=support[2])
 
     if (!is.null(sample_prior)) {
@@ -56,7 +52,7 @@ sample_log_unnormalized_density <- function(log_density, support, num_samples, s
     } else {
       # otherwise, we use the support to get starting values
       starting_values <- get_starting_values(support, N=50, max_width_for_uniform = 1000)
-      Z <- get_starting_values(100)
+      Z <- get_starting_values(support, N=100, max_width_for_uniform = 1000)
     }
 
     bay_settings <- list(burnin=100, iterations=num_samples, Z=matrix(Z, length(Z), ncol=1), startValue=matrix(starting_values, nrow=length(starting_values), ncol=1))

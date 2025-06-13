@@ -639,34 +639,49 @@ mode_variance_to_log_normal_params <- function(mode, variance, min_sigma=1+1e-6)
   root_function <- function(u) {
     u^4 - u^3 - c_val
   }
-
   # For very small variance, use approximation
-  if (c_val < 1e-7) {
+  epsilon <- 1e-4  # Small offset for numerical stability
+  c_threshold <- epsilon  # Use same threshold for consistency
+
+  if (c_val < c_threshold) {
     # When variance is very small, u ≈ 1 + c_val
     u <- 1 + c_val
   } else {
+    # Determine appropriate search interval
+    # The function f(u) = u^4 - u^3 - c has:
+    # - f(1) = -c < 0 (always negative)
+    # - f(u) → +∞ as u → +∞
+    # - Root exists for u > 1
 
-    # Find the root using uniroot
-    # We know u > 1 for positive variance, so search in (1, 10)
-    # If that fails, expand the search range
-    tryCatch({
-      #root_result <- uniroot(root_function, interval = c(1.001, 10))
-      root_result <- uniroot(root_function, interval = c(1e-8, 10))
-      u <- root_result$root
-    }, error = function(e) {
-      # Try wider range if initial search fails
-      #root_result <- uniroot(root_function, interval = c(1.001, 100))
-      root_result <- uniroot(root_function, interval = c(1e-8, 100))
-      u <- root_result$root
-    })
+    # Find upper bound where function becomes positive
+    upper_bound <- 2
+    while (root_function(upper_bound) <= 0 && upper_bound < 1000) {
+      upper_bound <- upper_bound * 2
+    }
 
+    # If we couldn't find a positive value, use approximation
+    if (upper_bound >= 1000) {
+      # For very large variance, approximate solution
+      # When c is large, u ≈ c^(1/3)
+      u <- c_val^(1/3)
+    } else {
+      # Use uniroot with proper interval
+      tryCatch({
+        root_result <- uniroot(root_function, interval = c(1 + epsilon/2, upper_bound))
+        u <- root_result$root
+      }, error = function(e) {
+        # Fallback: use analytical approximation
+        # For moderate c, u ≈ (1 + sqrt(1 + 4*c))/2 (from quadratic approximation)
+        warning("using fallback quadratic approximation to solve for q")
+        u <- (1 + sqrt(1 + 4*c_val)) / 2
+      })
+    }
   }
-
   # Calculate sigma^2 and mu
   sigma_sq <- log(u)
-  if (sigma_sq  < min_sigma^2) {
-    sigma_sq   = min_sigma^2
-  }
+  # if (sigma_sq  < min_sigma^2) {
+  #   sigma_sq   = min_sigma^2
+  # }
   mu <- log(mode) + sigma_sq
 
 
