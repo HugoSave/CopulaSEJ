@@ -291,94 +291,69 @@ run_performance_test <- function() {
   devtools::load_all(".")
   source("dev/dev_utils.R")
 
-  studies <- load_data_49(relative_dev_folder = FALSE)
+  studies <- load_data_47(relative_dev_folder = FALSE)
   studies <- filter_study_remove_ids(studies, study_ids=7)
+  relative_decoupler = get_relative_decoupler(D_tilde=1, compose_sigmoid=TRUE, m_preprocess="median", k=0.05)
 
   data_list_short <-studies
   param_list <- list()
 
+  decoupler_estimation_setting_list <- list(
+    list(
+      method = "beta_prior"
+    ),
+    list(
+      method = "beta_MAP",
+      prior_std = 0.1
+    ),
+    list(
+      method = "beta_MAP",
+      prior_std = 1.5
+    ),
+    list(
+      method = "MLE"
+    )
+  )
+  copula_models <- list("indep", "hierarchical")
+  decouplers <- list(
+    get_CDF_decoupler(),
+    relative_decoupler
+  )
 
-   param_list <- push_list(param_list,
-                           default_simulation_params(
-                             prediction_method = "copula",
-                             copula_model = "hierarchical",
-                             summarizing_function = get_three_quantiles_summarizing_function(),
-                             q_support_restriction = NULL,
-                             q_support_overshoot = 0.1,
-                             rejection_threshold = NULL,
-                             error_estimation_settings = list(
-                               method = "beta_MAP",
-                               prior_std=0.5
-                             ),
-                             vine_fit_settings = list(
-                               eta=10,
-                               recover_numerical_failure = TRUE
-                             ),
-                             connection_threshold = 0.7,
-                             connection_metric = "kendall"
-                           ))
+  connection_thresholds <- list(NULL, 0.7)
 
+  settings <- expand.grid(
+    copula_model = copula_models,
+    decoupler = decouplers,
+    decoupler_estimation_settings = decoupler_estimation_setting_list,
+    ct = connection_thresholds
+  ) |> as_tibble()
 
-   param_list <- push_list(param_list,
-                           default_simulation_params(
-                             prediction_method = "copula",
-                             copula_model = "hierarchical",
-                             summarizing_function = get_three_quantiles_summarizing_function(),
-                             q_support_restriction = NULL,
-                             q_support_overshoot = 0.1,
-                             rejection_threshold = 0.05,
-                             rejection_min_experts = 1,
-                             rejection_test = "distance_correlation",
-                             error_estimation_settings = list(
-                               method = "beta_MAP",
-                               prior_std=0.5
-                             ),
-                             vine_fit_settings = list(
-                               eta=10,
-                               recover_numerical_failure = TRUE
-                             ),
-                             connection_threshold = 0.7,
-                             connection_metric = "kendall"
-                           ))
+  for (i in seq_len(nrow(settings))) {
+    copula_model <- settings$copula_model[[i]]
+    decoupler <- settings$decoupler[[i]]
+    decoupler_estimation_settings <- settings$decoupler_estimation_settings[[i]]
+    connection_threshold <- settings$ct[[i]]
 
-   param_list <- push_list(param_list,
-                           default_simulation_params(
-                             prediction_method = "copula",
-                             copula_model = "indep",
-                             summarizing_function = get_three_quantiles_summarizing_function(),
-                             q_support_restriction = NULL,
-                             q_support_overshoot = 0.1,
-                             rejection_threshold = 0.05,
-                             rejection_min_experts = 1,
-                             rejection_test = "distance_correlation",
-                             error_estimation_settings = list(
-                               method = "beta_MAP",
-                               prior_std=0.1
-                             ),
-                             vine_fit_settings = list(
-                               eta=10,
-                               recover_numerical_failure = TRUE
-                             )
-                           ))
-   param_list <- push_list(param_list,
-                           default_simulation_params(
-                             prediction_method = "copula",
-                             copula_model = "indep",
-                             summarizing_function = get_three_quantiles_summarizing_function(),
-                             q_support_restriction = NULL,
-                             q_support_overshoot = 0.1,
-                             rejection_threshold = NULL,
-                             rejection_min_experts = 1,
-                             rejection_test = "distance_correlation",
-                             error_estimation_settings = list(
-                               method = "beta_MAP",
-                               prior_std=0.1
-                             ),
-                             vine_fit_settings = list(
-                               eta=10,
-                               recover_numerical_failure = TRUE
-                             )
-                           ))
+    param_list <- push_list(param_list,
+                            default_simulation_params(
+                              prediction_method = "copula",
+                              copula_model = copula_model,
+                              error_metric = decoupler,
+                              summarizing_function = get_three_quantiles_summarizing_function(),
+                              q_support_restriction = NULL,
+                              q_support_overshoot = 0.1,
+                              rejection_threshold = 0.05,
+                              rejection_min_experts = 1,
+                              rejection_test = "distance_correlation",
+                              vine_fit_settings = list(
+                                eta=10,
+                                recover_numerical_failure = TRUE
+                              ),
+                              connection_threshold = connection_threshold,
+                              error_estimation_settings = decoupler_estimation_settings
+                            ))
+  }
 
   result_list <- purrr::map(param_list, \(x) {
     analys_res <- run_study_find_posterior(data_list_short, x, "main")
@@ -390,6 +365,17 @@ run_performance_test <- function() {
     analys_res$results <- results_with_metrics
     analys_res
   }, .progress="Parameter choice")
+  #set.seed(42, "L'Ecuyer")
+  #result_list <- mclapply(param_list[1:2], function(x) {
+  #  analys_res <- run_study_find_posterior(data_list_short, x, "main")
+  #  results_with_metrics <- sample_and_add_metrics(analys_res)
+  #  results_with_metrics$posterior <- NULL
+  #  file_name <- create_file_name(x, "main")
+  #  print(glue::glue("Saving results to {file_name}"))
+  #  saveRDS(results_with_metrics, file_name)
+  #  analys_res$results <- results_with_metrics
+  #  analys_res
+  #}, mc.cores = 2)
 
   res_combined <- result_list |> combine_simulation_results()
 

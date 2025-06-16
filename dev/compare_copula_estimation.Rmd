@@ -20,19 +20,22 @@ settings_names <- copula_comparisons$settings |> unique()
 
 nr_na <- copula_comparisons |> group_by(settings) |> summarise(nr_na = sum(is.na(likelihood)), 
   nr_total = n(), percentage_na = nr_na/nr_total)
-nr_na
+nr_na |> arrange(desc(nr_na))
 ```
 
 ```{r}
+
 copula_plot_likelihood_boxplots <- function(df) {
   ggplot(df, aes(x=settings, y=likelihood)) +
     geom_boxplot() + # add line at y=1 
+    #geom_violin(scale="area") + # add line at y=1 
     geom_hline(yintercept=1, linetype="dashed", color = "red") +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))  
 }
 
-copula_comparisons |>  filter(likelihood<10)  |> copula_plot_likelihood_boxplots()
+copula_comparisons |> filter(likelihood<5)  |> copula_plot_likelihood_boxplots()
 ```
+
 ```{r}
 # Looking at the times where eta10 ct0.5 did converge numerically
 # remove test_question_id and study_id if there is any non finate value in that group
@@ -43,11 +46,14 @@ filtered
 ```{r}
 # function to create table of summary statistics for each setting
 create_copula_summary_table <- function(df) {
-  df <- df |> group_by(study_id, test_question_id) |> mutate(reference_likelihood = likelihood[settings == "indep"])
   #df |> group_by(study_id, test_question_id) |> mutate(lower_than_indep = likeli)
   df  |> group_by(settings) |> summarise(
-    num_lower_than_indep=sum(likelihood<reference_likelihood),
-    percentage_lower_than_indep=num_lower_than_indep/n(),
+    num_higher=sum(likelihood>1),
+    num_lower=sum(likelihood<1),
+    num_equal=sum(likelihood==1),
+    percentage_higher=num_higher/n(),
+    percentage_lower=num_lower/n(),
+    percentage_equal=num_equal/n(),
     mean_likelihoods=mean(likelihood),
     median_likelihoods=median(likelihood),
     sd_likelihoods=sd(likelihood),
@@ -56,74 +62,9 @@ create_copula_summary_table <- function(df) {
   )
 }
 
-filtered |>  create_copula_summary_table()
+filtered |>  create_copula_summary_table() |> 
+  arrange(percentage_lower - percentage_higher)
 ```
 ```{r}
 copula_comparisons |> filter(is.finite(likelihood)) |>create_copula_summary_table()
 ```
-
-```{r}
-
-copula_comparisons |> ggplot(aes(x=cum_prob)) +
-  geom_histogram(boundary=0, binwidth=0.05) +
-  facet_wrap(vars(settings))
-```
-```{r}
-plot_emperical_CDF_compaison <- function(df) {
-  ggplot(df, aes(x=cdf_values)) +
-    stat_ecdf() +
-    geom_abline(slope=1,intercept=0,linetype="dashed") + 
-    facet_wrap(vars(comb))
-}
-
-margin_comparisons_CDF |> plot_emperical_CDF_compaison()
-margin_comparisons_relative |> plot_emperical_CDF_compaison()
-margin_comp_p <- margin_comparisons |> plot_emperical_CDF_compaison()
-ggsave("output/marginal_comparisons.pdf", margin_comp_p, width=10, height=10)
-margin_comp_p
-
-```
-```{r}
-ecdfs <- split_by_setting |> purrr::map(\(df) {
-  ecdf(df$cdf_values)
-})
-plot(ecdfs[[1]])
-```
-```{r}
-# Compute distance to uniform distribution
-# for each setting
-
-distance_to_uniform <- function(ecdf, x) {
-  abs(ecdf(x) - punif(x, 0, 1))
-}
-
-distance_to_uniforms <- ecdfs |> purrr::map(\(emperical_cdf) {
-  x <- knots(emperical_cdf)
-  distances <- distance_to_uniform(emperical_cdf, x)
-  list(
-    avg_abs_distance = mean(distances),
-    max_distance = max(distances)
-  )
-}) |> purrr::list_transpose()
-
-# ks_tests <- split_by_setting |> purrr::map(\(df) {
-#   ks.test(df$cdf_values, y=punif)
-# })
-cvm_statistic <- split_by_setting |> purrr::map_dbl(\(df) {
-  cvm.test(df$cdf_values, null="punif")$statistic
-})
-
-# combine to a table
-tibble(
-  setting = settings_names,
-  avg_abs_distance = distance_to_uniforms$avg_abs_distance,
-  max_distance = distance_to_uniforms$max_distance,
-  cvm_statistic = cvm_statistic
-)
-
-
-# cvm_tests |> purrr::map(\(test) { # This is not too informative because I have so many samples it gives really low p values.
-#   test$p.value
-# })
-```
-

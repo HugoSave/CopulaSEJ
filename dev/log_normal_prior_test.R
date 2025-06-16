@@ -69,7 +69,7 @@ for (var_val in variance_values) {
     x = x,
     density = y,
     variance = var_val,
-    variance_label = sprintf("Var = %.1f", var_val)
+    sigma_label = sprintf("Var = %.1f", var_val)
   )
 
   plot_data <- rbind(plot_data, temp_df)
@@ -97,20 +97,12 @@ p1 <- ggplot(plot_data, aes(x = x, y = density, color = variance)) +
 
 print(p1)
 
-# Create a second plot showing selected variances more clearly
-# EASILY CUSTOMIZABLE: Change these values as needed
-selected_variances <- c(0.1, 0.5, 1.0, 2.0, 3.5, 5.0, 100)
+selected_variances <- c(0.1^2, 0.5^2, 1.0^2, 5.0^2, 10^2)
 
 # Adaptive color selection based on number of variances
 n_colors <- length(selected_variances)
-if (n_colors <= 2) {
-  colors <- c("#440154", "#fde725")[1:n_colors]
-} else if (n_colors <= 6) {
-  colors <- c("#440154", "#31688e", "#35b779", "#fde725", "#ff6b35", "#d73027")[1:n_colors]
-} else {
   # For more than 6 colors, use viridis palette
-  colors <- viridis::viridis(n_colors, option = "plasma")
-}
+colors <- viridis::viridis(n_colors, option = "plasma")
 
 plot_data_selected <- data.frame()
 
@@ -129,24 +121,25 @@ for (i in 1:length(selected_variances)) {
     x = x,
     density = y,
     variance = var_val,
-    variance_label = paste0(var_val),
+    sigma_label = round(sqrt(var_val), 3),
     color_group = as.factor(i)
   )
 
   plot_data_selected <- rbind(plot_data_selected, temp_df)
 }
 
-# Convert variance_label to ordered factor to ensure proper legend ordering
-variance_labels <- paste0(sort(selected_variances))
-plot_data_selected$variance_label <- factor(
-  plot_data_selected$variance_label,
+# Convert sigma_label to ordered factor to ensure proper legend ordering
+# sort string in numeric fashion
+variance_labels <- plot_data_selected$sigma_label |> unique() |> sort()
+plot_data_selected$sigma_label <- factor(
+  plot_data_selected$sigma_label,
   levels = variance_labels
 )
 
-p2 <- ggplot(plot_data_selected, aes(x = x, y = density, color = variance_label)) +
+p2 <- ggplot(plot_data_selected, aes(x = x, y = density, color = sigma_label)) +
   geom_line(size = 1.2) +
   geom_vline(xintercept = mode_val, linetype = "dashed", color = "black", size = 1) +
-  scale_color_manual(values = colors, name = expression(sigma[prior]^2),
+  scale_color_manual(values = colors, name = expression(sigma[prior]),
                      labels = parse(text = variance_labels)) +
   labs(
     title = "Log-Normal Distributions: Selected Variance Values",
@@ -163,76 +156,3 @@ p2 <- ggplot(plot_data_selected, aes(x = x, y = density, color = variance_label)
   xlim(0,10)
 
 print(p2)
-
-
-# Show the parameters for selected variances
-cat("Parameters for Log-Normal with Mode = 1:\n")
-cat(paste(rep("=", 50), collapse="") + "\n")
-
-for (var_val in selected_variances) {
-  params <- lognormal_from_mode_var(mode_val, var_val)
-  cat(sprintf("Variance = %.1f: μ = %.4f, σ = %.4f\n",
-              var_val, params$mu, params$sigma))
-}
-
-# Create a plot showing how parameters change with variance
-param_data <- data.frame()
-variance_range <- seq(0.1, 5, by = 0.1)
-
-for (var_val in variance_range) {
-  params <- lognormal_from_mode_var(mode_val, var_val)
-  param_data <- rbind(param_data, data.frame(
-    variance = var_val,
-    mu = params$mu,
-    sigma = params$sigma
-  ))
-}
-
-# Plot both mu and sigma
-library(tidyr)
-param_long <- param_data %>%
-  pivot_longer(cols = c(mu, sigma), names_to = "parameter", values_to = "value")
-
-p3 <- ggplot(param_long, aes(x = variance, y = value, color = parameter)) +
-  geom_line(size = 1.2) +
-  geom_point(size = 1.5, alpha = 0.7) +
-  scale_color_manual(values = c("mu" = "blue", "sigma" = "red"),
-                     labels = c("μ", "σ")) +
-  labs(
-    title = "Log-Normal Parameters vs Variance",
-    subtitle = "With fixed mode = 1",
-    x = "Variance",
-    y = "Parameter Value",
-    color = "Parameter"
-  ) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(hjust = 0.5, size = 14),
-    plot.subtitle = element_text(hjust = 0.5, size = 12)
-  )
-
-print(p3)
-
-# Summary statistics table
-summary_stats <- data.frame()
-
-for (var_val in selected_variances) {
-  params <- lognormal_from_mode_var(mode_val, var_val)
-
-  # Calculate mean and median
-  mean_val <- exp(params$mu + params$sigma_sq/2)
-  median_val <- exp(params$mu)
-
-  summary_stats <- rbind(summary_stats, data.frame(
-    Variance = var_val,
-    Mu = round(params$mu, 4),
-    Sigma = round(params$sigma, 4),
-    Mean = round(mean_val, 4),
-    Median = round(median_val, 4),
-    Mode = mode_val,
-    CV = round(sqrt(var_val)/mode_val, 4)
-  ))
-}
-
-cat("\n\nSummary Statistics:\n")
-print(summary_stats)

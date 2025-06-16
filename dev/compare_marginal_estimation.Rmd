@@ -75,7 +75,7 @@ p_k_plots <- purrr::map(k_values, function(k_val) {
 purrr::walk(seq_along(p_k_plots), function(i) {
   ggsave(paste0("output/marginal_comparisons_relative_k_", k_values[i], "_histogram.pdf"), p_k_plots[[i]], width=10, height=7)
 })
-p_k_plots[[1]]
+p_k_plots[[4]]
 ```
 
 ```{r}
@@ -102,35 +102,15 @@ purrr::walk(seq_along(ecdf_relative_plots), function(i) {
 })
 ecdf_cdf_plot
 ```
-
-
 ```{r}
-ecdf_relative_plots[[3]]
+ecdf_relative_plots[[4]]
 ```
 
-
-```{r}
-margin_comp_p <- margin_comparisons |> plot_emperical_CDF_compaison()
-ggsave("output/marginal_comparisons.pdf", margin_comp_p, width=10, height=10)
-margin_comp_p
-```
 
 ```{r}
 # Compute distance to uniform distribution
 # for each setting
 
-distance_to_uniform <- function(ecdf, x) {
-  abs(ecdf(x) - punif(x, 0, 1))
-}
-
-distance_to_uniforms <- ecdfs |> purrr::map(\(emperical_cdf) {
-  x <- knots(emperical_cdf)
-  distances <- distance_to_uniform(emperical_cdf, x)
-  list(
-    avg_abs_distance = mean(distances),
-    max_distance = max(distances)
-  )
-}) |> purrr::list_transpose()
 
 
 marginal_est_metrics <- split_by_setting |>   purrr::map(\(df) {
@@ -143,13 +123,6 @@ marginal_est_metrics <- split_by_setting |>   purrr::map(\(df) {
     )
   })  |> purrr::list_rbind()
 
-# combine to a table
-marginal_table <- tibble(
-  setting = margin_settings_names,
-  avg_abs_distance = distance_to_uniforms$avg_abs_distance,
-  max_distance = distance_to_uniforms$max_distance,
-  cvm_statistic = cvm_statistic
-)
 
 # get the 5 rows with lowest cvm_statistic
 top_5_marginal_methods <- marginal_est_metrics |> arrange(L1) |> head(5)
@@ -160,10 +133,13 @@ top_5_marginal_methods
 #   test$p.value
 # })
 ```
-```{r}
-top_10_L1 <- arrange(marginal_est_metrics, L1) |> head(10)
 
-top_10_L1
+```{r}
+# Get the prediction methods with cdf
+CDF_table_best_performers <- marginal_est_metrics |> filter(str_ends(prediction_method, "CDF")) |> arrange(L1) 
+# save to csv
+write_csv(CDF_table_best_performers, "output/CDF_table_best_performers.csv")
+CDF_table_best_performers
 ```
 
 

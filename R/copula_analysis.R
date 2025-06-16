@@ -204,9 +204,37 @@ wrap_copula <- function(copula, method=NULL) {
 }
 
 get_wrapped_independence_copula <- function(D, method="indep") {
-  # create a independence copula
-  indep_copula <- copula::indepCopula(dim = D)
-  wrap_copula(indep_copula, method=method)
+  # we use our own to enable 1 on the boundaries
+  density <- function(u_vec, log=FALSE) {
+    if (is.vector(u_vec)) {
+      out <- 1
+    } else if (is.matrix(u_vec)) {
+      out <- matrix(1, nrow = nrow(u_vec), ncol = 1)
+    } else {
+      stop("u_vec must be a vector or a matrix")
+    }
+    if (log) {
+      return(log(out)) # outputs 0
+    } else {
+      return(out)
+    }
+  }
+  distribution <- function(u) {
+    # we use our own to enable 1 on the boundaries
+    if (is.vector(u)) {
+      prod(u)
+    } else if (is.matrix(u)) {
+      matrixStats::rowProds(u)
+    } else {
+      stop("u_vec must be a vector or a matrix")
+    }
+  }
+  copula <- list(
+    density = density,
+    distribution = distribution,
+    copula = "indep"
+  )
+  return(copula)
 }
 
 fit_hiarchical_copula <- function(pseudo_obs, eta=1, recover_numerical_failure=FALSE, eps=1e-10) {
@@ -276,17 +304,15 @@ fit_hiarchical_copula <- function(pseudo_obs, eta=1, recover_numerical_failure=F
 
 # pseudo_obse rror_obs is nx(d*E) matrix (n questions, d * E errors)
 fit_copula <- function(pseudo_obs, copula_model = "joe",
-                       family_set = c("gaussian","indep"),
-                       selcrit="mbicv", psi0=0.5,
+                       family_set = c("onepar", "indep"),
+                       selcrit="aic", psi0=0.5,
                        copula_fit_method="itau",
                        threshold=0.5, eta=1, recover_numerical_failure=FALSE) {
   if (ncol(pseudo_obs) == 1) {
-    indep1DCopula = copula::indepCopula(dim=1)
-
-    return(wrap_copula(indep1DCopula))
+    return(get_wrapped_independence_copula(ncol(pseudo_obs), method="single observation"))
   }
   if (copula_model == "indep") {
-    return(wrap_copula(copula::indepCopula(dim = ncol(pseudo_obs))))
+    return(get_wrapped_independence_copula(ncol(pseudo_obs), method="indep"))
   }
 
   if (copula_model == "hierarchical") {
@@ -335,15 +361,15 @@ fit_copula <- function(pseudo_obs, copula_model = "joe",
 
 
     cop_fit <- rvinecopulib::vinecop(pseudo_obs, family_set = family_set,
-                                     cores =2, selcrit=selcrit, psi0=psi0,
+                                     cores = 2, selcrit=selcrit, psi0=psi0,
                                      threshold = threshold)
-    cop_fit$pair_copulas <- purrr::modify_tree(cop_fit$pair_copulas,
-                                       leaf = \(bicop) {
-                                         limits <- bicopula_smoothing_limits(bicop$family)
-                                         bicop$parameters = pmax(bicop$parameters, limits$lower)
-                                         bicop$parameters = pmin(bicop$parameters, limits$upper)
-                                         bicop
-                                       })
+    # cop_fit$pair_copulas <- purrr::modify_tree(cop_fit$pair_copulas,
+    #                                    leaf = \(bicop) {
+    #                                      limits <- bicopula_smoothing_limits(bicop$family)
+    #                                      bicop$parameters = pmax(bicop$parameters, limits$lower)
+    #                                      bicop$parameters = pmin(bicop$parameters, limits$upper)
+    #                                      bicop
+    #                                    })
 
     return(wrap_copula(cop_fit))
   }
@@ -1155,7 +1181,8 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
                                            rejection_min_experts=3,
                                            rejection_test="distance_correlation",
                                            connection_threshold=NULL,
-                                           connection_metric="kendall"
+                                           connection_metric="kendall",
+                                           use_pseudo_obs=FALSE
                                            ) {
   checkmate::assert_array(training_estimates, "numeric", d=3)
   checkmate::assert_numeric(training_realizations)
@@ -1170,6 +1197,7 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
   checkmate::assert_count(rejection_min_experts, positive=TRUE)
   checkmate::assert_subset(rejection_test, c("kruskal", "classical_calibration", "distance_correlation"))
   checkmate::assert_number(connection_threshold, null.ok=TRUE, lower=0, upper=1)
+  checkmate::assert_logical(use_pseudo_obs, len=1, any.missing = FALSE)
 
   # TODO implement a domain check prior?
   # domain_check <- decoupler$check_domain(abind::abind(training_estimates,
@@ -1222,7 +1250,11 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
   D_tilde = dim(decouple_values)[3]
   margin_distributions <- add_d_e_to_list(margin_distributions, D_tilde)
   # convert the decoupled values to cdf values using the estimated margins
-  cdf_values <- purrr::imap(margin_distributions, \(margin, i) margin$cdf(decouple_flattened[,i])) |> do.call(what=cbind)
+  if (use_pseudo_obs) {
+    cdf_values <- rvinecopulib::pseudo_obs(decouple_flattened)
+  } else {
+    cdf_values <- purrr::imap(margin_distributions, \(margin, i) margin$cdf(decouple_flattened[,i])) |> do.call(what=cbind)
+  }
 
   if (is.null(connection_threshold)){
     decoupler_copula <- rlang::inject(fit_copula(cdf_values, copula_model, !!!vine_fit_settings))
@@ -1688,8 +1720,7 @@ study_test_performance <- function(study_data, sim_params = NULL) {
           rejection_test = p$rejection_test,
           rejection_threshold = p$rejection_threshold,
           rejection_min_experts = p$rejection_min_experts,
-          connection_threshold = p$connection_threshold,
-          recover_numerical_failure = p$recover_numerical_failure,
+          connection_threshold = p$connection_threshold
         )
         }, error = \(e) {
           warning(e)
@@ -1770,34 +1801,6 @@ study_test_performance <- function(study_data, sim_params = NULL) {
   stats <- tibble::as_tibble(stats)
   # return stats and warnings
   list(stats = stats, warnings = unique(warnings))
-}
-
-new_simulation_params <- function(copula_model,
-                                      k_percentiles,
-                                      interpolation,
-                                      prediction_method,
-                                      rejection_test = "distance_correlation",
-                                      rejection_min_experts=1,
-                                      rejection_threshold,
-                                      summarizing_function,
-                                      error_metric = NULL,
-                                      error_estimation_settings = list(),
-                                      vine_fit_settings=list(),
-                                      q_support_restriction=NULL) {
-  structure(list(
-    copula_model = copula_model,
-    k_percentiles = k_percentiles,
-    interpolation = interpolation,
-    prediction_method = prediction_method,
-    rejection_test = rejection_test,
-    rejection_threshold = rejection_threshold,
-    rejection_min_experts=rejection_min_experts,
-    summarizing_function = summarizing_function,
-    error_metric = error_metric,
-    vine_fit_settings = vine_fit_settings,
-    error_estimation_settings=error_estimation_settings,
-    q_support_restriction=q_support_restriction
-  ), class="simulation_parameters")
 }
 
 default_simulation_params <- function(copula_model = "joe",

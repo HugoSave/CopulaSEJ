@@ -819,7 +819,7 @@ decoupler_relative_inverse <- function(z, m, epsilon=1e-6) {
   z_rep_matrix * (abs(m_rep_matrix) + epsilon) + m_rep_matrix
 }
 
-get_relative_decoupler <- function(D_tilde, compose_sigmoid=FALSE, m_preprocess=NULL, name="relative decoupler", short_name="(q-m)/(|m|+e)", k=6e-2, overshoot=0.1, epsilon=0.001) {
+get_relative_decoupler <- function(D_tilde, compose_sigmoid=FALSE, m_preprocess=NULL, name="relative decoupler", short_name="Rel.", k=6e-2, overshoot=0.1, epsilon=0.001) {
   checkmate::assert(
     checkmate::check_function(m_preprocess, null.ok = TRUE),
     checkmate::check_string(m_preprocess, null.ok = TRUE)
