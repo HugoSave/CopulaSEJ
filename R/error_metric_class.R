@@ -852,7 +852,7 @@ get_relative_decoupler <- function(D_tilde, compose_sigmoid=FALSE, m_preprocess=
     L=1
     x_0 = 0
     decoupler_composed <- compose_sigmoid_with_decoupler(decoupler,
-                                                sigmoid_f=purrr::partial(sigmoid, k=k),
+                                                sigmoid_f=purrr::partial(sigmoid_clamped, k=k),
                                                 sigmoid_prime_f=purrr::partial(sigmoid_prime, k=k),
                                                 sigmoid_inverse_f = purrr::partial(sigmoid_inverse, k=k)
     )
@@ -1358,6 +1358,17 @@ get_cdf_indep_function_fix_m <- function(m, overshoot=0.1, k_percentiles = c(5,5
 
 sigmoid <- function(x, k) {
   return(1 / (1 + exp(-k * x)))
+}
+
+sigmoid_clamped <- function(x, k, epsilon=1e-6) {
+  # this is a sigmoid with output clamped to [epsilon, 1-epsilon]
+  # this is useful for numerical stability
+  stopifnot(epsilon > 0)
+  stopifnot(epsilon < 0.5)
+  clamped_value <- sigmoid(x, k)
+  clamped_value <- pmax(clamped_value, epsilon)
+  clamped_value <- pmin(clamped_value, 1 - epsilon)
+  return(clamped_value)
 }
 
 sigmoid_prime <- function(x, k) {

@@ -15,13 +15,14 @@ summ_fun <- get_three_quantiles_summarizing_function()$f
 # Example partioning metric
 
 ```{r}
-study <- studies[[4]]
+study <- studies[[48]]
 test_question_id <- 11
 test_set <- study |> filter(question_id == test_question_id)
 training_set <- study |> filter(question_id != test_question_id)
 test_m_matrix <- test_set |> study_df_single_question_to_summary_matrix(summ_fun, k_percentiles)
 training_assessments <- training_set |> study_df_to_summary_array(summ_fun, k_percentiles)
 cdf_metric <- get_CDF_decoupler(scale="linear", support_restriction = NULL)
+rel_metric <- get_relative_decoupler(1, compose_sigmoid=TRUE, m_preprocess="median", k=0.05)
 
 ```
 ```{r}
@@ -29,7 +30,8 @@ res <- fit_and_construct_posterior_indep(
         training_assessments,
         training_set |> study_df_to_realizations(),
         test_m_matrix,
-        cdf_metric,
+        rel_metric,
+        #cdf_metric,
         "indep",
         vine_fit_settings = list(eta=10),
         error_estimation_settings = list(out_of_boundary="clamp", method="beta_MAP", prior_std=0.01),
@@ -43,6 +45,7 @@ res <- fit_and_construct_posterior_indep(
 
 ```{r}
 x <- seq(res$posterior$support[1], res$posterior$support[2], length.out = 1000)
+x <- seq(-1, 10, length.out = 1000)
 y <- res$posterior$logDM(x)
 plot(x,exp(y))
 s <- sample_log_unnormalized_density(res$posterior$logDM, res$posterior$support, 10000)
@@ -69,10 +72,6 @@ prior_sample_experts_mixtures <- function(n, expert_beliefs) {
   # return a single vector of samples
   unlist(samples)
 }
-```
-
-
-```{r}
 ```
 
 ```{r}

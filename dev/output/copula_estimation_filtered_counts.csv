@@ -1,0 +1,8 @@
+"","setting_pretty","Freq"
+"1","Frank",93
+"2","MAP:eta(1):tau[thresh](0.7)",35
+"3","MAP:eta(10):tau[thresh](0.7)",5
+"4","MAP:eta(50):tau[thresh](0.7)",2
+"5","Vine",73
+"6","Vine:tau[thresh](0.5)",72
+"7","Vine:tau[thresh](0.7)",31

@@ -207,6 +207,7 @@ create_log_unnormalized_posterior_indep <- function(indep_copula, indep_margins,
 
     pdf_values <- pdf_cdf_vals$pdf_values
     cdf_values <- pdf_cdf_vals$cdf_values
+    cdf_values <- clamp_cdf_values(cdf_values)
 
     log_copula_density_values <- indep_copula$density(cdf_values, log=TRUE)
     added_log_pdf_values <- rowSums(log(pdf_values))

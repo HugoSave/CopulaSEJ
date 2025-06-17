@@ -118,6 +118,11 @@ flatten_3d_array_to_matrix <- function(arr) {
   mat
 }
 
+clamp_cdf_values <- function(cdf_values, epsilon=1e-6) {
+  # Densities are defined on open margin intervals (0,1) so we clamp the values to avoid numerical issues
+  pmin(pmax(cdf_values, epsilon), 1 - epsilon) # avoid numerical issues with copula evaluation and fitting
+}
+
 assessments_to_decoupler_observations <- function(assessments, realizations, indep_fun) {
   checkmate::assert_array(assessments, d=3)
   checkmate::assert_numeric(realizations)

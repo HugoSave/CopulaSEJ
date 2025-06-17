@@ -1,4 +1,5 @@
 source("dev/dev_utils.R")
+library(parallel)
 
 compose_copula_settings_with_posterior_fitting <- function(copula_setting) {
   purrr::partial(
@@ -9,7 +10,7 @@ compose_copula_settings_with_posterior_fitting <- function(copula_setting) {
     q_support_restriction = NULL,
     q_support_overshoot = 0.1,
     rejection_threshold = 0.05,
-    use_pseudo_obs = TRUE
+    use_pseudo_obs = FALSE
   )
 }
 
@@ -58,7 +59,6 @@ evalute_copula_fit <- function(study_data,
         decoupler
       ),
       stan_optimization_error = function(e) {
-        browser()
         message("Stan optimization error: ", conditionMessage(e), "for study_id: ", study_id, "and question_id: ", test_question_id)
         return(NULL)
       },
@@ -113,24 +113,21 @@ run_copula_estimation_comparision <- function(seed=42) {
     setting = copula_settings
   )
 
-#  set.seed(seed)
-#  res <- purrr::pmap(combinations, \(study, setting) {
-#    get_posterior_func = compose_copula_settings_with_posterior_fitting(setting)
-#    evaluation <- evalute_copula_fit(
-#      study,
-#      decoupler,
-#      get_posterior_func,
-#      k_percentiles = c(5, 50, 95)
-#    )
-#    evaluation$settings <- get_setting_name(setting)
-#    evaluation
-#  }, .progress = "Evaluating copula settings")
-#
-
-
+  ## Use this for sequential
   # set.seed(seed)
-  # seeds <- sample.int(.Machine$integer.max, nrow(combinations))
-#
+  # res <- purrr::pmap(combinations, \(study, setting) {
+  #   get_posterior_func = compose_copula_settings_with_posterior_fitting(setting)
+  #   evaluation <- evalute_copula_fit(
+  #     study,
+  #     decoupler,
+  #     get_posterior_func,
+  #     k_percentiles = c(5, 50, 95)
+  #   )
+  #   evaluation$settings <- get_setting_name(setting)
+  #   evaluation
+  # }, .progress = "Evaluating copula settings")
+
+  # Parallel if you are on linux/mac
   res <- run_mclapply_copula(
     combinations,
     decoupler,

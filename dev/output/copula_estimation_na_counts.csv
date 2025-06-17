@@ -1,0 +1,14 @@
+"setting_pretty","nr_na","nr_total","percentage_na"
+"MAP:eta(50)",164,299,0.548494983277592
+"MAP:eta(10)",159,299,0.531772575250836
+"MAP:eta(1)",158,299,0.528428093645485
+"MAP:eta(1):tau[threshold](0.5)",76,299,0.254180602006689
+"MAP:eta(10):tau[threshold](0.5)",69,299,0.230769230769231
+"MAP:eta(50):tau[threshold](0.5)",62,299,0.207357859531773
+"MAP:eta(50):tau[threshold](0.7)",7,299,0.0234113712374582
+"MAP:eta(1):tau[threshold](0.7)",5,299,0.0167224080267559
+"MAP:eta(10):tau[threshold](0.7)",4,299,0.0133779264214047
+"Frank",0,299,0
+"Vine",0,299,0
+"Vine:tau[threshold](0.5)",0,299,0
+"Vine:tau[threshold](0.7)",0,299,0

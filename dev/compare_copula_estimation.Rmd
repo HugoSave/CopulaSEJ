@@ -17,30 +17,101 @@ settings_names <- copula_comparisons$settings |> unique()
 #copula_comparisons <- copula_comparisons |> group_by(settings, study_id, test_question_id) |> summarise(likelihood=max(likelihood), cum_prob=max(cum_prob)) |> ungroup()
 ```
 ```{r}
+# transform setting names
+transform_settings_name <- function(x) {
+  sapply(x, function(setting) {
+    if (setting == "frank") {
+      return("Frank")
+    } else if (grepl("^hierarchical_", setting)) {
+      # Extract eta value
+      eta_match <- regmatches(setting, regexpr("eta\\d+", setting))
+      eta_num <- gsub("eta", "", eta_match)
+      
+      # Check if there's a ct value
+      if (grepl("_ct", setting)) {
+        ct_match <- regmatches(setting, regexpr("ct[0-9.]+", setting))
+        ct_num <- gsub("ct", "", ct_match)
+        return(paste0("MAP:eta(", eta_num, "):tau[threshold](", ct_num, ")"))
+      } else {
+        return(paste0("MAP:eta(", eta_num, ")"))
+      }
+    } else if (grepl("^vine_", setting)) {
+      # Check if there's a ct value
+      if (grepl("_ct", setting)) {
+        ct_match <- regmatches(setting, regexpr("ct[0-9.]+", setting))
+        ct_num <- gsub("ct", "", ct_match)
+        return(paste0("Vine:tau[threshold](", ct_num, ")"))
+      } else {
+        return("Vine")
+      }
+    } else {
+      return(setting)  # fallback for unrecognized patterns
+    }
+  }, USE.NAMES = FALSE)
+}
 
-nr_na <- copula_comparisons |> group_by(settings) |> summarise(nr_na = sum(is.na(likelihood)), 
+copula_comparisons$setting_pretty <- transform_settings_name(copula_comparisons$settings)
+```
+
+```{r}
+
+nr_na <- copula_comparisons |> group_by(setting_pretty) |> summarise(nr_na = sum(is.na(likelihood)), 
   nr_total = n(), percentage_na = nr_na/nr_total)
-nr_na |> arrange(desc(nr_na))
+nr_na <- nr_na |> arrange(desc(nr_na))
+# save nr_na to csv
+write.csv(nr_na, "output/copula_estimation_na_counts.csv", row.names = FALSE)
+nr_na
+```
+```{r}
+# filter methods with above 5 % NA values using percentage_na from above
+copula_comparisons <- copula_comparisons |> filter(!setting_pretty %in% nr_na$setting_pretty[nr_na$percentage_na > 0.05])
+
 ```
 
 ```{r}
 
 copula_plot_likelihood_boxplots <- function(df) {
-  ggplot(df, aes(x=settings, y=likelihood)) +
-    geom_boxplot() + # add line at y=1 
-    #geom_violin(scale="area") + # add line at y=1 
-    geom_hline(yintercept=1, linetype="dashed", color = "red") +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+  nr_filtered <- df |> filter(likelihood > 5) |> select("setting_pretty") |> table()
+  
+  # Convert to data frame for easier plotting
+  filter_counts <- data.frame(
+    setting_pretty = names(nr_filtered),
+    count = paste0("+",as.numeric(nr_filtered))
+  )
+  df_filtered <- df |> filter(likelihood <= 5)
+  
+  ggplot(df_filtered, aes(x = setting_pretty, y = likelihood)) +
+    geom_boxplot() +
+    geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+    geom_text(data = filter_counts, 
+              aes(x = setting_pretty, y = 5.5, label = count),
+              vjust = 0, size = 3.5, color = "black") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+    scale_x_discrete(name = "Copula Estimation Method", labels = scales::parse_format()) +
+    scale_y_continuous(name = "Likelihood")
 }
 
-copula_comparisons |> filter(likelihood<5)  |> copula_plot_likelihood_boxplots()
+# save nr_filtered to csv
+write.csv(nr_filtered, "output/copula_estimation_filtered_likelihoods_counts.csv")
+
+
+cat("Number of filtered copula comparisons with likelihood > 5:", nr_filtered, "\n")
+copula_estimation_likelihoods <- copula_comparisons |> copula_plot_likelihood_boxplots()
+ggsave(copula_estimation_likelihoods, filename = "output/copula_estimation_likelihoods.pdf", width = 10, height = 6)
+copula_estimation_likelihoods 
 ```
 
 ```{r}
+copula_est_error_types <- copula_comparisons$likelihood[!is.finite(copula_comparisons$likelihood)] |> table(useNA="ifany")
+
 # Looking at the times where eta10 ct0.5 did converge numerically
 # remove test_question_id and study_id if there is any non finate value in that group
-filtered<-copula_comparisons |> group_by(study_id, test_question_id) |> filter(all(is.finite(likelihood)))
+filtered <- copula_comparisons |> filter(is.finite(likelihood))
 filtered
+# print nr filtered points
+nr_filtered_non_finite <- copula_comparisons |> filter(!is.finite(likelihood)) |> select("setting_pretty") |> table(useNA="ifany")
+
+nr_filtered_non_finite
 ```
 
 ```{r}
@@ -51,6 +122,8 @@ create_copula_summary_table <- function(df) {
     num_higher=sum(likelihood>1),
     num_lower=sum(likelihood<1),
     num_equal=sum(likelihood==1),
+    q_0.25 = quantile(likelihood, 0.25),
+    q_0.75 = quantile(likelihood, 0.75),
     percentage_higher=num_higher/n(),
     percentage_lower=num_lower/n(),
     percentage_equal=num_equal/n(),
@@ -63,7 +136,19 @@ create_copula_summary_table <- function(df) {
 }
 
 filtered |>  create_copula_summary_table() |> 
-  arrange(percentage_lower - percentage_higher)
+  arrange(percentage_lower - percentage_higher) |> head(5)
+# round the percentage columns to 2 decimal places
+# add the quantiles of likelihood
+filtered <- filtered |> mutate(
+  quantile_0.25 = quantile(likelihood, 0.25),
+  quantile_0.5 = quantile(likelihood, 0.5),
+  quantile_0.75 = quantile(likelihood, 0.75)
+)
+
+filtered  |>  create_copula_summary_table() |> 
+  mutate(across(c(percentage_higher:percentage_equal, q_0.25, q_0.75), ~ signif(.x, 3))) |> 
+  arrange(percentage_lower - percentage_higher) |> head(5) |>
+  select(settings, percentage_higher, percentage_lower, q_0.25, q_0.75)
 ```
 ```{r}
 copula_comparisons |> filter(is.finite(likelihood)) |>create_copula_summary_table()

@@ -237,9 +237,9 @@ get_wrapped_independence_copula <- function(D, method="indep") {
   return(copula)
 }
 
-fit_hiarchical_copula <- function(pseudo_obs, eta=1, recover_numerical_failure=FALSE, eps=1e-10) {
+fit_hiarchical_copula <- function(pseudo_obs, eta=1, recover_numerical_failure=FALSE) {
   # fit a hierarchical copula
-  pseudo_obs <- pmin(pmax(pseudo_obs, eps), 1 - eps) # prevent Inf and -Inf.
+  pseudo_obs <- clamp_cdf_values(pseudo_obs)
   normal_space <- qnorm(pseudo_obs) # stan model expects this transformation already to be made
   N = nrow(pseudo_obs)
   D = ncol(pseudo_obs)
@@ -722,24 +722,31 @@ mode_variance_to_log_normal_params <- function(mode, variance, min_sigma=1+1e-6)
   )
 }
 
+clamp_pdf_domain_values_on_boundary <- function(x, support, clamp_epsilon=1e-6) {
+  # only clamp values that are exactly on the support
+  leftbound <- support[1] + clamp_epsilon
+  rightbound <- support[2] - clamp_epsilon
+  in_left_critical <- which(x < leftbound & x >= support[1])
+  in_right_critical <- which(x > rightbound & x <= support[2])
+  x[in_left_critical] <- leftbound
+  x[in_right_critical] <- rightbound
+  x
+}
+
 estimate_margin_beta_prior <- function(support, beta_mean, beta_var) {
   beta_vars <- mean_variance_to_beta_params(beta_mean, beta_var, support[1], support[2])
 
-  pdf <- function(e_vec, log=FALSE) {
-    extraDistr::dnsbeta(e_vec, beta_vars[1], beta_vars[2], min=support[1], max=support[2], log=log)
-  }
-  cdf <- function(e_vec, log=FALSE) {
-    extraDistr::pnsbeta(e_vec, beta_vars[1], beta_vars[2], min=support[1], max=support[2], log.p=log)
-  }
-  list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(beta_vars[1], beta_vars[2], support[1], support[2]))
+  create_beta_dist_object(beta_vars[1], beta_vars[2], support)
 }
 
 create_beta_dist_object <- function(a, b, support) {
   pdf <- function(e_vec, log=FALSE) {
+    e_vec <- clamp_pdf_domain_values_on_boundary(e_vec, support) # clamp values on the boundary to open set
     extraDistr::dnsbeta(e_vec, a, b, min=support[1], max=support[2], log=log)
   }
 
   cdf <- function(e_vec) {
+    e_vec <- clamp_pdf_domain_values_on_boundary(e_vec, support) # clamp values on the boundary to open set
     extraDistr::pnsbeta(e_vec, a, b, min=support[1], max=support[2])
   }
 
@@ -871,15 +878,7 @@ estimate_margin_beta <- function(obs_vec, support=NULL, overshoot=0.1, out_of_bo
   shape1 = params[1]
   shape2 = params[2]
 
-  pdf <- function(e_vec) {
-    extraDistr::dnsbeta(e_vec, shape1, shape2, min=support[1], max=support[2])
-  }
-
-  cdf <- function(e_vec) {
-    extraDistr::pnsbeta(e_vec, shape1, shape2, min=support[1], max=support[2])
-  }
-
-  list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(shape1, shape2, support[1], support[2]))
+  create_beta_dist_object(shape1, shape2, support)
 }
 
 beta_approx_middel <- function(shape1, shape2, L, U) {
@@ -1152,6 +1151,7 @@ construct_equal_weight_sample_prior <- function(test_matrix, cum_probabilities=c
   return(prior_sample_experts_mixtures)
 }
 
+
 #' Title
 #'
 #' @param training_estimates
@@ -1254,6 +1254,8 @@ fit_and_construct_posterior_indep <- function(training_estimates, training_reali
     cdf_values <- rvinecopulib::pseudo_obs(decouple_flattened)
   } else {
     cdf_values <- purrr::imap(margin_distributions, \(margin, i) margin$cdf(decouple_flattened[,i])) |> do.call(what=cbind)
+    # filter cdf_values that are on 0 and 1 since that implies
+    cdf_values <- clamp_cdf_values(cdf_values)
   }
 
   if (is.null(connection_threshold)){
