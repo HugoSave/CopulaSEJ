@@ -55,7 +55,9 @@ sample_log_unnormalized_density <- function(log_density, support, num_samples, s
       Z <- get_starting_values(support, N=100, max_width_for_uniform = 1000)
     }
 
-    bay_settings <- list(burnin=100, iterations=num_samples, Z=matrix(Z, length(Z), ncol=1), startValue=matrix(starting_values, nrow=length(starting_values), ncol=1))
+    bay_settings <- list(burnin=100, iterations=num_samples, Z=matrix(Z, length(Z), ncol=1),
+                         startValue=matrix(starting_values, nrow=length(starting_values), ncol=1),
+                         message=FALSE)
     bayesian_tools_samples <- BayesianTools::runMCMC(bayesian_setup, sampler="DEzs", settings=bay_settings)
     BayesianTools::getSample(bayesian_tools_samples)[,1]
   }

@@ -1,3 +1,4 @@
+library(parallel)
 
 copula_shortname <- function(copula_family) {
   # Create a short name for the copula model
@@ -201,37 +202,31 @@ run_study_find_posterior <- function(studies, params, sim_group="tmp"){
 }
 
 sample_df_parallel <- function(df, num_samples=5000, n_cores=4) {
-
-  # Extract only what you need first (avoids copying the whole df)
+  # Extract only needed columns
   post_list <- df$posterior
   realization_list <- df$realization
   sample_prior_list <- df$sample_prior
+  rm(df)
+  gc()
 
-  # Create a minimal task list
-  tasks <- lapply(1:length(post_list), function(i) {
-    list(
-      post = post_list[[i]],
-      realization = realization_list[[i]],
-      sample_prior = sample_prior_list[[i]]
-    )
-  })
-
-  list_of_metrics <- mclapply(tasks, function(task) {
-    if (!is.list(task$post)) {
+  list_of_metrics <- mclapply(1:length(post_list), function(i) {
+    if (!is.list(post_list[[i]])) {
       return(performance_metrics_list())
     } else {
       return(posterior_performance_metrics(
-        task$post$logDM, task$post$support, task$realization,
-        num_samples = num_samples, mean_value = task$post$mean,
-        median_value = task$post$median, sample_prior = task$sample_prior
+        post_list[[i]]$logDM, post_list[[i]]$support,
+        realization_list[[i]], num_samples = num_samples,
+        mean_value = post_list[[i]]$mean,
+        median_value = post_list[[i]]$median,
+        sample_prior = sample_prior_list[[i]]
       ))
     }
   }, mc.cores = n_cores)
   return(list_of_metrics)
-
 }
 
 sample_and_add_metrics <- function(analys_res, run_parallel=TRUE, num_samples=5000, n_cores=4) {
+  browser()
 
   df <- analys_res$results
   if (run_parallel) {
@@ -400,7 +395,7 @@ run_performance_test <- function() {
 
   result_list <- purrr::map(param_list, \(x) {
     analys_res <- run_study_find_posterior(data_list_short, x, "main")
-    results_with_metrics <- sample_and_add_metrics(analys_res, run_parallel = TRUE, num_samples=5000, n_cores=8)
+    results_with_metrics <- sample_and_add_metrics(analys_res, run_parallel = TRUE, num_samples=5000, n_cores=4)
     results_with_metrics$posterior <- NULL
     file_name <- create_file_name(x, "main")
     print(glue::glue("Saving results to {file_name}"))
