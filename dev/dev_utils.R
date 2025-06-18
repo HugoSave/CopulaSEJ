@@ -1,4 +1,3 @@
-library(CopulaSEJ)
 library(energy)
 library(goftest)
 

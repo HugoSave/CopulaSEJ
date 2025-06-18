@@ -77,10 +77,24 @@ beta_std_shortname <- function(error_estimation_settings) {
   if (is.null(error_estimation_settings) || is.null(error_estimation_settings$prior_std)) {
     return("")
   } else {
-    return(glue::glue("BS({error_estimation_settings$prior_std})"))
+    return(glue::glue("prior({error_estimation_settings$prior_std})"))
   }
 }
 
+margin_estimation_shortname <- function(margin_estimation_settings) {
+  # Create a short name for the margin estimation settings
+  if (is.null(margin_estimation_settings)) {
+    return("")
+  } else if (margin_estimation_settings$method == "beta_prior") {
+    return("PE")
+  } else if (margin_estimation_settings$method == "beta_MLE") {
+      return("MLE")
+  } else if (margin_estimation_settings$method == "beta_MAP") {
+    return(glue::glue("BetaMAP({margin_estimation_settings$prior_std})"))
+  } else {
+    return(margin_estimation_settings$method)
+  }
+}
 
 parameter_shortname <- function(sim_params, sep="") {
   method = sim_params$prediction_method
@@ -91,10 +105,11 @@ parameter_shortname <- function(sim_params, sep="") {
     components <- c(
       copula_shortname(sim_params$copula_model),
       sim_params$error_metric$short_name,
-      sim_params$summarizing_function$short_name,
-      rejection_shortname(sim_params$rejection_test,
-                          sim_params$rejection_threshold,
-                          sim_params$rejection_min_experts),
+      margin_estimation_shortname(sim_params$error_estimation_settings),
+      #sim_params$summarizing_function$short_name,
+      #rejection_shortname(sim_params$rejection_test,
+      #                    sim_params$rejection_threshold,
+      #                    sim_params$rejection_min_experts),
       connection_threshold_shortname(sim_params$connection_threshold),
       beta_std_shortname(sim_params$error_estimation_settings)
     )
@@ -188,12 +203,9 @@ create_file_name <- function(sim_params, sim_group="tmp", sim_nr=NULL) {
   return(file_name)
 }
 
-run_study_find_posterior <- function(studies, params, sim_group="tmp"){
-  print(glue::glue("Analyzing method: {params$prediction_method} with copula model: {params$copula_model} and error metric: {params$error_metric$name} and summarising function: {params$summarizing_function$name}"))
+run_study_find_posterior <- function(studies, params){
 
   analysis_res <- run_analysis_per_study(studies, params)
-  analysis_res$results["prediction_method"] <- parameter_shortname(params)
-  #file_name <- create_file_name(params, sim_group=sim_group)
   analysis_res$params <- params
   #print(glue::glue("Saving results to {file_name}"))
   #saveRDS(analysis_res, file_name)
@@ -226,7 +238,6 @@ sample_df_parallel <- function(df, num_samples=5000, n_cores=4) {
 }
 
 sample_and_add_metrics <- function(analys_res, run_parallel=TRUE, num_samples=5000, n_cores=4) {
-  browser()
 
   df <- analys_res$results
   if (run_parallel) {
@@ -299,11 +310,12 @@ run_benchmarking_methods <- function() {
                             prediction_method = "uniform"
                           ))
 
-  result_list <- purrr::map(param_list, \(x) {
-    analys_res <- run_study_find_posterior(data_list_short, x, "benchmark")
+  result_list <- purrr::map(param_list, \(params) {
+    analys_res <- run_analysis_per_study(studies, params)
+    print(glue::glue("Begging sampling for: {parameter_shortname(params)}"))
     results_with_metrics <- sample_and_add_metrics(analys_res, run_parallel = TRUE)
     results_with_metrics$posterior <- NULL
-    file_name <- create_file_name(x, "benchmark")
+    file_name <- create_file_name(params, "benchmark")
     print(glue::glue("Saving results to {file_name}"))
     saveRDS(results_with_metrics, file_name)
     analys_res$results <- results_with_metrics
@@ -349,7 +361,7 @@ run_performance_test <- function() {
       prior_std = 1.5
     ),
     list(
-      method = "beta_MAP"
+      method = "beta_MLE"
     )
   )
   copula_models <- list("indep", "hierarchical")
@@ -392,12 +404,22 @@ run_performance_test <- function() {
                               error_estimation_settings = decoupler_estimation_settings
                             ))
   }
+  param_list <- param_list[1:2]
+  param_names <- purrr::map_chr(param_list, parameter_shortname)
+  param_file_names <- purrr::map_chr(param_list, \(p) create_file_name(p, sim_group="main"))
+  # check in advance that unique names are generated for each parameter set
+  stopifnot(length(unique(param_names)) == length(param_list))
+  stopifnot(length(unique(param_names)) == length(param_list))
 
-  result_list <- purrr::map(param_list, \(x) {
-    analys_res <- run_study_find_posterior(data_list_short, x, "main")
+  result_list <- purrr::pmap(list(param_list, param_names, param_file_names), \(params, name, file_name) {
+    print(glue::glue("Running analysis for: {name}"))
+    analys_res <- run_analysis_per_study(data_list_short, params)
+    analys_res$results["prediction_method"] <- name
+    print(glue::glue("Starting sampling for: {name}"))
     results_with_metrics <- sample_and_add_metrics(analys_res, run_parallel = TRUE, num_samples=5000, n_cores=4)
+    # remove the closure fields since they take up a lot of memory
     results_with_metrics$posterior <- NULL
-    file_name <- create_file_name(x, "main")
+    results_with_metrics$sample_prior <- NULL
     print(glue::glue("Saving results to {file_name}"))
     saveRDS(results_with_metrics, file_name)
     analys_res$results <- results_with_metrics

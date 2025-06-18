@@ -12,7 +12,6 @@ library(patchwork)
 library(copula)
 library(scales)
 library(knitr)
-library(CopulaSEJ)
 source("dev_utils.R")
 
 #file_name <- "output/data49_nov24.rds"
@@ -32,8 +31,8 @@ id_high_mag  <- id_high_mag |> rename(test_question=question_id)
 
 #saveRDS(results_df, "dev/output/performance_comparison_new.rds")
 #results_df<-readRDS("output/performance_comparison_new.rds")
-copula_method_df <-readRDS("output/compare_performance_simulation.rds")$results
-copula_method_df <- copula_method_df |> filter(prediction_method %in% c("CohierarchicalCDF3QNoRCT(0.7)", "CoInCDF3QNoRNoCT"))
+copula_method_df <- readRDS("output/compare_performance_simulation.rds")$results
+#copula_method_df <- copula_method_df |> filter(prediction_method %in% c("CohierarchicalCDF3QNoRCT(0.7)", "CoInCDF3QNoRNoCT"))
 benchmark_df <- readRDS("output/benchmarking_methods_performance.rds")$results
 benchmark_df <- benchmark_df |> filter(study_id !=7) # remove study_id 7, not in the normal performance 
 
@@ -168,7 +167,7 @@ uniformity_metrics <- methods_with_densities |> split(methods_with_densities$pre
       !!!metrics
     )
   })  |> purrr::list_rbind()
-uniformity_metrics
+uniformity_metrics |> arrange(L1)
 ```
 
 
