@@ -310,23 +310,36 @@ run_benchmarking_methods <- function() {
                             prediction_method = "uniform"
                           ))
 
-  result_list <- purrr::map(param_list, \(params) {
-    analys_res <- run_analysis_per_study(studies, params)
-    print(glue::glue("Begging sampling for: {parameter_shortname(params)}"))
-    results_with_metrics <- sample_and_add_metrics(analys_res, run_parallel = TRUE)
-    results_with_metrics$posterior <- NULL
-    file_name <- create_file_name(params, "benchmark")
-    print(glue::glue("Saving results to {file_name}"))
-    saveRDS(results_with_metrics, file_name)
-    analys_res$results <- results_with_metrics
-    analys_res
-  })
-
-  res_combined <- result_list |> combine_simulation_results()
+  res_combined <- check_and_run_param_list(param_list, data_list_short[1:3])
 
   saveRDS(res_combined, "dev/output/benchmarking_methods_performance.rds")
 
   print("Results saved to dev/output/benchmarking_methods_performance.rds")
+}
+
+check_and_run_param_list <- function(param_list, studies) {
+  param_names <- purrr::map_chr(param_list, parameter_shortname)
+  param_file_names <- purrr::map_chr(param_list, \(p) create_file_name(p, sim_group="main"))
+  # check in advance that unique names are generated for each parameter set
+  stopifnot(length(unique(param_names)) == length(param_list))
+  stopifnot(length(unique(param_names)) == length(param_list))
+
+  result_list <- purrr::pmap(list(param_list, param_names, param_file_names), \(params, name, file_name) {
+    print(glue::glue("Running analysis for: {name}"))
+    analys_res <- run_analysis_per_study(studies, params)
+    analys_res$results["prediction_method"] <- name
+    print(glue::glue("Starting sampling for: {name}"))
+    results_with_metrics <- sample_and_add_metrics(analys_res, run_parallel = TRUE, num_samples=5000, n_cores=4)
+    # remove the closure fields since they take up a lot of memory
+    results_with_metrics$posterior <- NULL
+    results_with_metrics$sample_prior <- NULL
+    print(glue::glue("Saving results to {file_name}"))
+    saveRDS(results_with_metrics, file_name)
+    analys_res$results <- results_with_metrics
+    analys_res
+  }, .progress="Parameter choice")
+  res_combined <- result_list |> combine_simulation_results()
+  return(res_combined)
 }
 
 run_performance_test <- function() {
@@ -404,27 +417,6 @@ run_performance_test <- function() {
                               error_estimation_settings = decoupler_estimation_settings
                             ))
   }
-  param_list <- param_list[1:2]
-  param_names <- purrr::map_chr(param_list, parameter_shortname)
-  param_file_names <- purrr::map_chr(param_list, \(p) create_file_name(p, sim_group="main"))
-  # check in advance that unique names are generated for each parameter set
-  stopifnot(length(unique(param_names)) == length(param_list))
-  stopifnot(length(unique(param_names)) == length(param_list))
-
-  result_list <- purrr::pmap(list(param_list, param_names, param_file_names), \(params, name, file_name) {
-    print(glue::glue("Running analysis for: {name}"))
-    analys_res <- run_analysis_per_study(data_list_short, params)
-    analys_res$results["prediction_method"] <- name
-    print(glue::glue("Starting sampling for: {name}"))
-    results_with_metrics <- sample_and_add_metrics(analys_res, run_parallel = TRUE, num_samples=5000, n_cores=4)
-    # remove the closure fields since they take up a lot of memory
-    results_with_metrics$posterior <- NULL
-    results_with_metrics$sample_prior <- NULL
-    print(glue::glue("Saving results to {file_name}"))
-    saveRDS(results_with_metrics, file_name)
-    analys_res$results <- results_with_metrics
-    analys_res
-  }, .progress="Parameter choice")
   #set.seed(42, "L'Ecuyer")
   #result_list <- mclapply(param_list[1:2], function(x) {
   #  analys_res <- run_study_find_posterior(data_list_short, x, "main")
@@ -436,8 +428,8 @@ run_performance_test <- function() {
   #  analys_res$results <- results_with_metrics
   #  analys_res
   #}, mc.cores = 2)
+  res_combined <- check_and_run_param_list(param_list, data_list_short)
 
-  res_combined <- result_list |> combine_simulation_results()
 
   file_name = "dev/output/compare_performance_simulation.rds"
   saveRDS(res_combined, file_name)
