@@ -58,6 +58,7 @@ nr_na |> arrange(desc(nr_na))
 write_csv(nr_na, "output/margin_estimation_na_counts.csv")
 nr_na
 ```
+
 ```{r}
 margin_comparisons <- margin_comparisons |> filter(is.finite(likelihood))
 ```

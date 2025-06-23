@@ -6,6 +6,9 @@ compose_copula_settings_with_posterior_fitting <- function(copula_setting) {
     fit_and_construct_posterior_indep,
     copula_model = copula_setting$copula_model,
     vine_fit_settings = copula_setting$vine_fit_settings,
+    error_estimation_settings = list(
+      method = "beta_prior"
+    ),
     connection_threshold = copula_setting$connection_threshold,
     q_support_restriction = NULL,
     q_support_overshoot = 0.1,

@@ -306,7 +306,7 @@ fit_hiarchical_copula <- function(pseudo_obs, eta=1, recover_numerical_failure=F
 fit_copula <- function(pseudo_obs, copula_model = "joe",
                        family_set = c("onepar", "indep"),
                        selcrit="aic", psi0=0.5,
-                       copula_fit_method="itau",
+                       copula_fit_method="ml",
                        threshold=0.5, eta=1, recover_numerical_failure=FALSE) {
   if (ncol(pseudo_obs) == 1) {
     return(get_wrapped_independence_copula(ncol(pseudo_obs), method="single observation"))
@@ -837,7 +837,7 @@ estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_va
 #' the mean.
 #'
 #' @examples
-estimate_margin_beta <- function(obs_vec, support=NULL, overshoot=0.1, out_of_boundary="clamp", clamp_epsilon=1e-3) {
+estimate_margin_beta <- function(obs_vec, support=NULL, overshoot=0.1, out_of_boundary="discard", clamp_epsilon=1e-3) {
   checkmate::assert_numeric(support, null.ok=TRUE, len=2, any.missing=FALSE, finite=TRUE)
   min_obs <- min(obs_vec)
   max_obs <- max(obs_vec)
@@ -952,7 +952,7 @@ estimate_margin_kde <- function(obs, support, bw="SJ", package="stats") {
 #' @export
 #'
 #' @examples
-estimate_margins <- function(observations, supports=NULL, method="beta", overshoot=0.1, out_of_boundary="clamp", bw="SJ", beta_mean=0.5, beta_var=1/12, prior_std=0.1) {
+estimate_margins <- function(observations, supports=NULL, method="beta", overshoot=0.1, out_of_boundary="discard", bw="SJ", beta_mean=0.5, beta_var=1/12, prior_std=0.1) {
   checkmate::assert_matrix(observations, "numeric")
   nr_dims = ncol(observations)
   checkmate::assert(
@@ -1295,8 +1295,8 @@ posterior_product_predictor <- function(test_matrix,
   decoupler_fix_m <- decoupler$fix_m(test_matrix)
 
   logDM <- function(q) {
-    pdf_vals <- decoupler_fix_m$f(q) |> abind::adrop(drop=3) # nxEx1 to nxE
-    matrixStats::rowProds(pdf_vals)
+    pdf_vals <- decoupler_fix_m$f_prime_q(q) |> abind::adrop(drop=3) # nxEx1 to nxE
+    matrixStats::rowSums2(log(pdf_vals))
   }
 
   list(
@@ -1441,6 +1441,52 @@ construct_posterior_margins <- function(margin_distributions, decoupler, m_matri
     }
   )
 
+}
+
+fit_JC_model <- function(training_set, test_set, realizations) {
+  checkmate::assert_matrix(test_set, "numeric", ncols=3) # ExD
+  checkmate::assert_array(training_set, "numeric", d=3) # NxExD
+  N = dim(training_set)[1]
+  E = dim(training_set)[2]
+  D = dim(training_set)[3]
+  checkmate::assert_numeric(realizations, len=N, any.missing=FALSE, finite=TRUE)
+
+  test_medians <- training_set[,,2] # NxE matrix
+  errors <- matrix(realizations, nrow = N, ncol=E) - test_medians # NxE
+
+  beliefs <- linear_distribution_interpolation_matrix_w_overshoot(
+    test_set,
+    c(0.05, 0.5, 0.95),
+    overshoot = 0.1,
+    support_restriction = NULL
+  )
+  cdf_values <- purrr::imap(beliefs, \(belief, i) {
+    # calculate the cdf values for the errors
+    belief$cdf(errors[,i])
+  }) |> do.call(what=cbind) # NxE matrix
+  # fit the copula to the cdf values
+  cdf_values <- clamp_cdf_values(cdf_values) # clamp cdf values to [0,1] range
+  error_copula <- fit_copula(cdf_values, "frank")
+
+  log_density <- function(q_vals) {
+    # calculate the log density of the values
+    pdf_values <- purrr::map(beliefs, \(belief) belief$pdf(q_vals)) |>
+      do.call(what=cbind) # NxE
+    cdf_values <- purrr::map(beliefs, \(belief) belief$cdf(q_vals)) |>
+      do.call(what=cbind) # NxE
+    # calculate the log density using the copula
+    log(error_copula$density(cdf_values)) +
+      rowSums(log(pdf_values)) # sum over the experts
+  }
+
+  list(
+    posterior = list(
+      logDM = log_density,
+      support = beliefs[[1]]$support
+    ),
+    error_copula = error_copula,
+    beliefs = beliefs
+  )
 }
 
 copula_fit_and_predict_JC_assumption <- function(training_set,

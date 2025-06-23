@@ -15,12 +15,13 @@ summ_fun <- get_three_quantiles_summarizing_function()$f
 # Example partioning metric
 
 ```{r}
-study <- studies[[48]]
-test_question_id <- 11
+study <- studies[[5]]
+test_question_id <- 5
 test_set <- study |> filter(question_id == test_question_id)
 training_set <- study |> filter(question_id != test_question_id)
 test_m_matrix <- test_set |> study_df_single_question_to_summary_matrix(summ_fun, k_percentiles)
 training_assessments <- training_set |> study_df_to_summary_array(summ_fun, k_percentiles)
+realizations <- training_set |> study_df_to_realizations()
 cdf_metric <- get_CDF_decoupler(scale="linear", support_restriction = NULL)
 rel_metric <- get_relative_decoupler(1, compose_sigmoid=TRUE, m_preprocess="median", k=0.05)
 
@@ -28,7 +29,7 @@ rel_metric <- get_relative_decoupler(1, compose_sigmoid=TRUE, m_preprocess="medi
 ```{r}
 res <- fit_and_construct_posterior_indep(
         training_assessments,
-        training_set |> study_df_to_realizations(),
+        realizations,
         test_m_matrix,
         rel_metric,
         #cdf_metric,
@@ -45,7 +46,6 @@ res <- fit_and_construct_posterior_indep(
 
 ```{r}
 x <- seq(res$posterior$support[1], res$posterior$support[2], length.out = 1000)
-x <- seq(-1, 10, length.out = 1000)
 y <- res$posterior$logDM(x)
 plot(x,exp(y))
 s <- sample_log_unnormalized_density(res$posterior$logDM, res$posterior$support, 10000)
@@ -56,16 +56,8 @@ res$decoupler_margins |> plot_distributions()
 ```
 
 ```{r}
-f <- approxfun(x, exp(y), yleft=0, yright=0)
-area <- integrate(f, res$posterior$support[1], res$posterior$support[2], subdivisions = 10^15)
-f_normalized <- function(x) f(x) / area$value
-cumulative_probability <- function(x) integrate(f_normalized, res$posterior$support[1], x, subdivisions = 10000)$value
-
-uniroot(\(x) cumulative_probability(x) - 0.5, interval=res$posterior$support)$root
-# find median of the posterior
-```
-```{r}
 dists <- linear_distribution_interpolation_matrix_w_overshoot(test_m_matrix, c(0.05,0.5,0.95))
+dists |> plot_distributions("pdf")
 prior_sample_experts_mixtures <- function(n, expert_beliefs) {
   # sample from the dists
   samples <- purrr::map(expert_beliefs, \(x) x$sample(n))
@@ -129,6 +121,15 @@ res$decoupler_margins |> plot_distributions("pdf")
 ```
 
 
+```{r}
+JC_model <- fit_JC_model(training_assessments, test_m_matrix, realizations)
+y_JC <- JC_model$posterior$logDM(x)
+plot(x, exp(y_JC), type="l", col="red", lwd=2, main="JC model vs posterior")
+```
+```{r}
+y_DP <- posterior_product_predictor(test_m_matrix)$posterior$logDM(x)
+plot(x, exp(y_DP), type="l", col="blue", lwd=2, main="DP model vs posterior")
+```
 
 
 

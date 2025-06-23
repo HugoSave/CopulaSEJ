@@ -289,17 +289,21 @@ run_benchmarking_methods <- function() {
                             q_support_restriction = NULL,
                           ))
 
-  param_list <- push_list(param_list,
-                          default_simulation_params(
-                            prediction_method = "median_average",
-                            summarizing_function = get_three_quantiles_summarizing_function(),
-                          ))
+  #param_list <- push_list(param_list,
+  #                        default_simulation_params(
+  #                          prediction_method = "median_average",
+  #                          summarizing_function = get_three_quantiles_summarizing_function(),
+  #                        ))
 
   param_list <- push_list(param_list,
                           default_simulation_params(
                             prediction_method = "equal_weights"
                           ))
 
+  param_list <- push_list(param_list,
+                          default_simulation_params(
+                            prediction_method = "jouini_clemen"
+                          ))
   param_list <- push_list(param_list,
                           default_simulation_params(
                             prediction_method = "classical_global_opt"

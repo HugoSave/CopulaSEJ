@@ -36,6 +36,7 @@ copula_method_df <- readRDS("output/compare_performance_simulation.rds")$results
 #copula_method_df <- copula_method_df |> filter(prediction_method %in% c("CohierarchicalCDF3QNoRCT(0.7)", "CoInCDF3QNoRNoCT"))
 benchmark_df <- readRDS("output/benchmarking_methods_performance.rds")$results
 benchmark_df <- benchmark_df |> filter(study_id !=7) # remove study_id 7, not in the normal performance 
+benchmark_df <- benchmark_df |> filter(prediction_method != "MA") 
 benchmark_df <- benchmark_df |> filter(study_id !=48) # remove study_id 7, not in the normal performance 
 
 stopifnot(nrow(copula_method_df)/length(unique(copula_method_df$prediction_method)) == nrow(benchmark_df)/length(unique(benchmark_df$prediction_method)))
@@ -87,6 +88,112 @@ pos_values
 
 abs_values
 ```
+```{r}
+get_uniformity_metrics_per_method <- function(df) {
+  df |> split(df$prediction_method) |>
+    purrr::map(\(df) {
+      metrics <- calculate_uniformity_metrics(df$cum_prob)
+      tibble::tibble_row(
+        prediction_method = unique(df$prediction_method),
+        !!!metrics
+      )
+    })  |> purrr::list_rbind()
+}
+# calculate the 
+
+get_error_metrics_per_method <- function(df) {
+  df |> group_by(prediction_method) |> 
+    summarise(
+      MAE_median = mean(abs(median-realization)),
+      MedAE_median = median(abs(median-realization)),
+      RMSE_mean = sqrt(mean((mean-realization)^2)),
+      MedSE_mean = median((mean-realization)^2),
+      MedAPE = median(abs(median-realization)/realization),
+      MedAPE = median(abs((median-realization)/realization)),
+      .groups = "drop"
+    )
+}
+
+get_all_point_metrics_per_method <- function(df) {
+  get_uniformity_metrics_per_method(df) |> 
+    full_join(get_error_metrics_per_method(df), by="prediction_method")
+}
+
+copula_method_metrics <- get_all_point_metrics_per_method(copula_method_df)
+
+copula_method_metrics |> arrange(L1)
+
+add_columns_from_prediction_method <- function(df) {
+  df |> mutate(
+    decoupler = case_when(
+      str_detect(prediction_method, "CDF") ~ "CDF",
+      str_detect(prediction_method, "Rel") ~ "Rel",
+      .default = prediction_method
+    ),
+    copula = case_when(
+      str_detect(prediction_method, "In") ~ "Indep",
+      str_detect(prediction_method, "Hi") ~ "Gaussian",
+      TRUE ~ NA_character_
+    ),
+    marginal_method = case_when(
+      str_detect(prediction_method, "PE") ~ "PE",
+      str_detect(prediction_method, "MAP") ~ "NoCT",
+      str_detect(prediction_method, "3Q") ~ "3Q",
+      str_detect(prediction_method, "EW") ~ "EW",
+      str_detect(prediction_method, "DP") ~ "DP",
+      TRUE ~ NA_character_
+    )
+  )
+}
+
+copula_method_metrics <- add_columns_from_prediction_method(copula_method_metrics) 
+
+add_parseable_metric_names <- function(df) {
+  df |> mutate(
+  `L['Unif']^1` = L1,
+  `MedAE['Median']` = MedAE_median,
+  `MedSE['Mean']` = MedSE_mean
+)
+}
+
+copula_method_metrics <- add_parseable_metric_names(copula_method_metrics)
+# important metrics
+focus_metrics <- c("L['Unif']^1", "MedAE['Median']", "MedSE['Mean']")
+# select these metrics and pivot wider
+
+
+create_per_method_metrics_plot <- function(df) {
+  metrics_long <- df |> 
+  select(prediction_method, copula, decoupler, all_of(focus_metrics)) |> 
+  pivot_longer(-c(prediction_method, decoupler, copula), names_to = "metric", values_to = "value") |> 
+  mutate(metric = factor(metric, levels = focus_metrics))
+  metrics_long |> ggplot(aes(prediction_method, value, color=decoupler, shape=copula)) +
+    geom_point() +
+    labs(title = NULL,
+         x = "Prediction Method",
+         y = "Metric Value") +
+    facet_grid(rows = vars(metric), scales="free_y", labeller=label_parsed) + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+copula_methods_point_metric_p <- copula_method_metrics |> 
+  create_per_method_metrics_plot()
+
+ggsave("output/copula_methods_point_metric.pdf", copula_methods_point_metric_p, width = 10, height = 10)
+copula_methods_point_metric_p
+```
+```{r}
+# extract a subset of copula prediction modls of interest
+copula_method_df$prediction_method |> unique() |> sort()
+
+methods_of_interest <- c("His(Rel.)BetaMAP(0.5)CT(0.7)prior(0.5)", "Ins(Rel.)BetaMAP(0.5)CT(0.7)prior(0.5)")
+
+copula_method_df_subset <- copula_method_df |> filter(prediction_method %in% methods_of_interest)
+
+results_df <- rbind(benchmark_df, copula_method_df_subset)
+```
+
+
 ```{r, fig.width=10}
 
 results_df_small |> filter(realization!=0 & prediction!=0) |> mutate(realization=abs(realization), prediction=abs(prediction)) |> 
@@ -104,15 +211,15 @@ results_df_small |> filter(realization!=0 & prediction!=0) |> mutate(realization
   theme_minimal() + # remove legend 
   theme(legend.position = "none")
 
-abs_values <- results_df |> filter(realization!=0 & prediction!=0) |> mutate(realization=abs(realization), prediction=abs(prediction)) |> 
+abs_values <- results_df |> filter(realization!=0 & prediction!=0) |> mutate(realization=abs(realization), prediction=abs(median)) |> 
   ggplot(aes(realization, prediction, color=prediction_method)) +
   geom_point() +
   # add dashed x=y line
   geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
   coord_fixed(ratio = 1) +
-  labs(title = "Predicted and Realized Values",
+  labs(title = NULL,
        x = "abs(Realized Value)",
-       y = "abs(Predicted Value)") +
+       y = "abs(Median)") +
   scale_y_continuous(trans = "log10")+
   scale_x_continuous(trans =  "log10")+
   facet_wrap(~prediction_method) +
@@ -121,6 +228,14 @@ abs_values <- results_df |> filter(realization!=0 & prediction!=0) |> mutate(rea
 
 ggsave("output/abs_values.pdf", abs_values, width = 10, height = 14)
 abs_values
+```
+```{r}
+
+results_metric_table <- get_all_point_metrics_per_method(results_df) |>
+  add_parseable_metric_names() |>
+  add_columns_from_prediction_method()
+
+create_per_method_metrics_plot(results_metric_table)
 ```
 
 # Look at relative error
@@ -147,16 +262,18 @@ relative_erros_boxplot
 
 ```{r}
 # plot the emperical ecdf of the cum_prob  
-results_df |> filter(cum_prob != 1 & cum_prob != 0) |> ggplot(aes(x = cum_prob)) +
+ecdfs_subset <- results_df |> filter(cum_prob != 1 & cum_prob != 0) |> ggplot(aes(x = cum_prob)) +
   stat_ecdf(geom = "step") +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black") +
   facet_wrap(~ prediction_method) +
   labs(
-    title = "Empirical CDF of cum_prob by Prediction Method",
+    title = NULL,
     x = "Cumulative Probability",
     y = "Empirical CDF"
   ) +
-  theme_minimal()
+  theme_bw()
+ggsave("output/ecdfs_subset.pdf", ecdfs_subset, width = 10, height = 6)
+ecdfs_subset
 ```
 ```{r}
 results_df <- results_df |> mutate(
