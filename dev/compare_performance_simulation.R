@@ -77,7 +77,7 @@ beta_std_shortname <- function(error_estimation_settings) {
   if (is.null(error_estimation_settings) || is.null(error_estimation_settings$prior_std)) {
     return("")
   } else {
-    return(glue::glue("prior({error_estimation_settings$prior_std})"))
+    return(glue::glue("prior[{error_estimation_settings$prior_std}]") |> as.character())
   }
 }
 
@@ -90,7 +90,7 @@ margin_estimation_shortname <- function(margin_estimation_settings) {
   } else if (margin_estimation_settings$method == "beta_MLE") {
       return("MLE")
   } else if (margin_estimation_settings$method == "beta_MAP") {
-    return(glue::glue("MAP({margin_estimation_settings$prior_std})"))
+    return(glue::glue("MAP({margin_estimation_settings$prior_std})") |> as.character())
   } else {
     return(margin_estimation_settings$method)
   }
@@ -324,7 +324,9 @@ run_benchmarking_methods <- function() {
 
 add_params_specific_columns <- function(df, params) {
   # Add specific columns to the dataframe based on the parameters
+  df$params_name <- parameter_shortname(params)
   df$prediction_method <- prediction_method_shortname(params$prediction_method)
+  browser()
   if (params$prediction_method == "copula") {
     df$copula_model <- copula_shortname(params$copula_model)
     df$decoupler <- params$error_metric$short_name
@@ -333,7 +335,7 @@ add_params_specific_columns <- function(df, params) {
                                              params$rejection_min_experts)
     df$connection_threshold <- connection_threshold_shortname(params$connection_threshold)
     df$sigma_prior <- beta_std_shortname(params$error_estimation_settings)
-    df$margin_estimation_settings <- margin_estimation_shortname(params$margin_estimation_settings)
+    df$margin_estimation_settings <- margin_estimation_shortname(params$error_estimation_settings)
   } else {
     df$copula_model <- NA_character_
     df$decoupler <- NA_character_

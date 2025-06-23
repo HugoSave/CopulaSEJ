@@ -18,7 +18,7 @@ source("dev_utils.R")
 studies <- load_data_49(relative_dev_folder = TRUE)
 studies <- load_data_47(relative_dev_folder = TRUE)
 # id_high_mag <- find_high_magnitude_differences(studies, max_mag_ratio = 1000)
-id_high_mag  <- id_high_mag |> rename(test_question=question_id)
+#id_high_mag  <- id_high_mag |> rename(test_question=question_id)
 #
 #percentile_names <- k_percentiles_to_colname(c(5, 50, 95))
 #
@@ -480,5 +480,10 @@ copulaDM <- create_copula_posterior_numerical_integration(indepCopula(10), distr
 copula_fit_and_predict_JC_assumption(training_set, test_set, "indep", "linear")
 equal_weight_predict(test_set)
 
+```
+
+
+```{r}
+res_combined$results
 ```
 
