@@ -115,8 +115,12 @@ evalute_marginal_fit <-  function(study_data, decoupler, get_posterior_obj, k_pe
     if (!is.null(safe_result$error)) {
       message("Caught error in get_posterior_obj: ", conditionMessage(safe_result$error), " for study_id: ", study_data$study_id |> unique(), " and question_id: ", test_set$question_id |> unique())
       return(tibble::tibble(
-        likelihoods = NA,
-        cdf_values = NA,
+        likelihood = NA,
+        cdf_value = NA,
+        expert_id = NA,
+        median = NA,
+        mean = NA,
+        realization = NA,
         test_question_id = test_question_id
       ))
     } else {
@@ -126,17 +130,28 @@ evalute_marginal_fit <-  function(study_data, decoupler, get_posterior_obj, k_pe
     stopifnot(length(test_question_id) == 1)
     q_realization <- test_set$realization |> unique()
     test_decouple_values <- decoupler$f(q_realization, arr_format$test_summaries) # 1xEx\tilde{D}
-    flattened <- abind::adrop(test_decouple_values, drop=1) |> flatten_matrix_row_by_row()
-
-    cdf_values <- purrr::imap_dbl(decoupler_margins, \(margin, i) margin$cdf(flattened[i]))
-    pdf_values <- purrr::imap_dbl(decoupler_margins, \(margin, i) margin$pdf(flattened[i]))
     E_values = purrr::map_dbl(decoupler_margins, \(margin) margin$expert_id)
     D_values = purrr::map_dbl(decoupler_margins, \(margin) margin$d)
+    decoupled_values <- abind::adrop(test_decouple_values, drop=1)
+    decoupled_values_E <- decoupled_values[E_values, , drop=FALSE] # select only the decoupled values for the experts in E_values
+    flattened <- decoupled_values_E |> flatten_matrix_row_by_row() #
+
+    cdf_values <- purrr::map2_dbl(decoupler_margins, flattened, \(margin, value) margin$cdf(value))
+    pdf_values <- purrr::map2_dbl(decoupler_margins, flattened, \(margin, value) margin$pdf(value))
+    beta_params_list <- purrr::map(decoupler_margins, \(margin) margin$beta_params)
+    medians <- purrr::map_dbl(beta_params_list, \(beta_p)
+                              extraDistr::qnsbeta(0.5, beta_p$a, beta_p$b, beta_p$c, beta_p$d))
+    means <- purrr::map_dbl(beta_params_list, \(beta_p)
+                            beta_p$c + (beta_p$d - beta_p$c) * beta_p$a / (beta_p$a + beta_p$b)
+                              )
 
     tibble::tibble(
-      likelihoods = pdf_values,
-      cdf_values = cdf_values,
+      likelihood = pdf_values,
+      cdf_value = cdf_values,
       expert_id = E_values,
+      median=medians,
+      mean = means,
+      realization = flattened,
       d = D_values,
       test_question_id = test_question_id
     )
@@ -148,7 +163,6 @@ evalute_marginal_fit <-  function(study_data, decoupler, get_posterior_obj, k_pe
 run_decoupler_margin_comparison <- function() {
   library(devtools)
   devtools::load_all(".")
-  options(mc.cores=parallel::detectCores()-1)
   studies <- load_data_47(relative_dev_folder = FALSE) # |> filter_studies_few_questions(min_questions = 11)
   #studies <- filter_study_remove_ids(studies,7)
   settings <- decoupler_and_margin_estimation_settings_study()

@@ -750,7 +750,10 @@ create_beta_dist_object <- function(a, b, support) {
     extraDistr::pnsbeta(e_vec, a, b, min=support[1], max=support[2])
   }
 
-  return(list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(a, b, support[1], support[2])))
+  params <- list(a=a, b=b, c=support[1], d=support[2])
+
+  return(list(pdf = pdf, cdf = cdf, support = support, approx_middle=beta_approx_middel(a, b, support[1], support[2]),
+              beta_params = params))
 }
 
 estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_var=1/12, prior_std=0.1, clamp_epsilon=0.001, out_of_boundary="clamp", prior_form="lognormal") {

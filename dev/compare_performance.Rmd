@@ -16,7 +16,8 @@ source("dev_utils.R")
 
 #file_name <- "output/data49_nov24.rds"
 studies <- load_data_49(relative_dev_folder = TRUE)
-id_high_mag <- find_high_magnitude_differences(studies, max_mag_ratio = 1000)
+studies <- load_data_47(relative_dev_folder = TRUE)
+# id_high_mag <- find_high_magnitude_differences(studies, max_mag_ratio = 1000)
 id_high_mag  <- id_high_mag |> rename(test_question=question_id)
 #
 #percentile_names <- k_percentiles_to_colname(c(5, 50, 95))
@@ -35,6 +36,7 @@ copula_method_df <- readRDS("output/compare_performance_simulation.rds")$results
 #copula_method_df <- copula_method_df |> filter(prediction_method %in% c("CohierarchicalCDF3QNoRCT(0.7)", "CoInCDF3QNoRNoCT"))
 benchmark_df <- readRDS("output/benchmarking_methods_performance.rds")$results
 benchmark_df <- benchmark_df |> filter(study_id !=7) # remove study_id 7, not in the normal performance 
+benchmark_df <- benchmark_df |> filter(study_id !=48) # remove study_id 7, not in the normal performance 
 
 stopifnot(nrow(copula_method_df)/length(unique(copula_method_df$prediction_method)) == nrow(benchmark_df)/length(unique(benchmark_df$prediction_method)))
 
@@ -117,7 +119,7 @@ abs_values <- results_df |> filter(realization!=0 & prediction!=0) |> mutate(rea
   theme_minimal() + # remove legend 
   theme(legend.position = "none")
 
-ggsave("output/abs_values.pdf", abs_values, width = 10, height = 10)
+ggsave("output/abs_values.pdf", abs_values, width = 10, height = 14)
 abs_values
 ```
 
@@ -142,6 +144,7 @@ relative_erros_boxplot <- results_df |> filter(realization != 0 & abs(rel_error)
 ggsave("output/relative_erros_boxplot.png", relative_erros_boxplot, width=10)
 relative_erros_boxplot 
 ```
+
 ```{r}
 # plot the emperical ecdf of the cum_prob  
 results_df |> filter(cum_prob != 1 & cum_prob != 0) |> ggplot(aes(x = cum_prob)) +
@@ -156,6 +159,13 @@ results_df |> filter(cum_prob != 1 & cum_prob != 0) |> ggplot(aes(x = cum_prob))
   theme_minimal()
 ```
 ```{r}
+results_df <- results_df |> mutate(
+  MAE_median = mean(abs(median-realization)),
+  RMSE_mean = sqrt(mean((mean-realization)^2))
+)
+```
+
+```{r}
 methods_with_densities <- results_df |> filter(!is.na(cum_prob))
 
 # calculate the 
@@ -167,7 +177,18 @@ uniformity_metrics <- methods_with_densities |> split(methods_with_densities$pre
       !!!metrics
     )
   })  |> purrr::list_rbind()
-uniformity_metrics |> arrange(L1)
+
+error_metrics <- results_df |> group_by(prediction_method) |> 
+  summarise(
+    MAE_median = mean(abs(median-realization)),
+    MedAE_median = median(abs(median-realization)),
+    RMSE_mean = sqrt(mean((mean-realization)^2)),
+    MedAPE = median(abs(median-realization)/realization),
+    .groups = "drop"
+  )
+point_metrics <- uniformity_metrics |> left_join(error_metrics, by="prediction_method")
+
+point_metrics |> arrange(L1) 
 ```
 
 

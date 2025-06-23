@@ -92,10 +92,10 @@ copula_plot_likelihood_boxplots <- function(df) {
 }
 
 # save nr_filtered to csv
-write.csv(nr_filtered, "output/copula_estimation_filtered_likelihoods_counts.csv")
+#write.csv(nr_filtered, "output/copula_estimation_filtered_likelihoods_counts.csv")
 
 
-cat("Number of filtered copula comparisons with likelihood > 5:", nr_filtered, "\n")
+#cat("Number of filtered copula comparisons with likelihood > 5:", nr_filtered, "\n")
 copula_estimation_likelihoods <- copula_comparisons |> copula_plot_likelihood_boxplots()
 ggsave(copula_estimation_likelihoods, filename = "output/copula_estimation_likelihoods.pdf", width = 10, height = 6)
 copula_estimation_likelihoods 
@@ -118,17 +118,17 @@ nr_filtered_non_finite
 # function to create table of summary statistics for each setting
 create_copula_summary_table <- function(df) {
   #df |> group_by(study_id, test_question_id) |> mutate(lower_than_indep = likeli)
-  df  |> group_by(settings) |> summarise(
+  df  |> group_by(setting_pretty) |> summarise(
     num_higher=sum(likelihood>1),
     num_lower=sum(likelihood<1),
     num_equal=sum(likelihood==1),
     q_0.25 = quantile(likelihood, 0.25),
     q_0.75 = quantile(likelihood, 0.75),
-    percentage_higher=num_higher/n(),
-    percentage_lower=num_lower/n(),
+    percentage_over_1=num_higher/n(),
+    percentage_under_1=num_lower/n(),
     percentage_equal=num_equal/n(),
     mean_likelihoods=mean(likelihood),
-    median_likelihoods=median(likelihood),
+    median=median(likelihood),
     sd_likelihoods=sd(likelihood),
     min_likelihoods=min(likelihood),
     max_likelihoods=max(likelihood),
@@ -136,7 +136,7 @@ create_copula_summary_table <- function(df) {
 }
 
 filtered |>  create_copula_summary_table() |> 
-  arrange(percentage_lower - percentage_higher) |> head(5)
+  arrange(percentage_under_1 - percentage_over_1) |> head(5)
 # round the percentage columns to 2 decimal places
 # add the quantiles of likelihood
 filtered <- filtered |> mutate(
@@ -145,10 +145,14 @@ filtered <- filtered |> mutate(
   quantile_0.75 = quantile(likelihood, 0.75)
 )
 
-filtered  |>  create_copula_summary_table() |> 
-  mutate(across(c(percentage_higher:percentage_equal, q_0.25, q_0.75), ~ signif(.x, 3))) |> 
-  arrange(percentage_lower - percentage_higher) |> head(5) |>
-  select(settings, percentage_higher, percentage_lower, q_0.25, q_0.75)
+over_lower_one_table <- filtered  |>  create_copula_summary_table() |> 
+  mutate(across(c(percentage_over_1:percentage_equal, q_0.25, median, q_0.75), ~ signif(.x, 3))) |> 
+  arrange(percentage_under_1 - percentage_over_1) |>
+  select(setting_pretty, percentage_over_1, percentage_under_1, q_0.25, median, q_0.75)
+# save over_lower_one_table to csv
+write_csv(over_lower_one_table, "output/copula_estimation_over_under_one_table.csv")
+over_lower_one_table 
+
 ```
 ```{r}
 copula_comparisons |> filter(is.finite(likelihood)) |>create_copula_summary_table()

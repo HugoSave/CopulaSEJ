@@ -9,7 +9,7 @@ copula_shortname <- function(copula_family) {
   } else if (copula_family == "frank") {
     return("Fr")
   } else if (copula_family == "hierarchical") {
-    return("Hi")
+    return("Ga")
   } else {
     return(copula_family)
   }
@@ -90,7 +90,7 @@ margin_estimation_shortname <- function(margin_estimation_settings) {
   } else if (margin_estimation_settings$method == "beta_MLE") {
       return("MLE")
   } else if (margin_estimation_settings$method == "beta_MAP") {
-    return(glue::glue("BetaMAP({margin_estimation_settings$prior_std})"))
+    return(glue::glue("MAP({margin_estimation_settings$prior_std})"))
   } else {
     return(margin_estimation_settings$method)
   }
@@ -273,9 +273,10 @@ run_benchmarking_methods <- function() {
   source("dev/dev_utils.R")
 
   file_name <- "dev/output/data49_nov24.rds"
-  studies <- load_data_49(relative_dev_folder = FALSE)
+  #studies <- load_data_49(relative_dev_folder = FALSE)
+  studies <- load_data_47(relative_dev_folder = FALSE)
   #studies <- filter_studies_few_questions(studies, min_questions=11)
-  studies <- filter_study_remove_ids(studies, study_ids=7)
+  #studies <- filter_study_remove_ids(studies, study_ids=7)
 
   data_list_short <- studies
   param_list <- list()
@@ -310,11 +311,34 @@ run_benchmarking_methods <- function() {
                             prediction_method = "uniform"
                           ))
 
-  res_combined <- check_and_run_param_list(param_list, data_list_short[1:3])
+  res_combined <- check_and_run_param_list(param_list, data_list_short)
 
   saveRDS(res_combined, "dev/output/benchmarking_methods_performance.rds")
 
   print("Results saved to dev/output/benchmarking_methods_performance.rds")
+}
+
+add_params_specific_columns <- function(df, params) {
+  # Add specific columns to the dataframe based on the parameters
+  df$prediction_method <- prediction_method_shortname(params$prediction_method)
+  if (params$prediction_method == "copula") {
+    df$copula_model <- copula_shortname(params$copula_model)
+    df$decoupler <- params$error_metric$short_name
+    df$rejection_test <- rejection_shortname(params$rejection_test,
+                                             params$rejection_threshold,
+                                             params$rejection_min_experts)
+    df$connection_threshold <- connection_threshold_shortname(params$connection_threshold)
+    df$sigma_prior <- beta_std_shortname(params$error_estimation_settings)
+    df$margin_estimation_settings <- margin_estimation_shortname(params$margin_estimation_settings)
+  } else {
+    df$copula_model <- NA_character_
+    df$decoupler <- NA_character_
+    df$rejection_test <- NA_character_
+    df$connection_threshold <- NA_character_
+    df$sigma_prior <- NA_character_
+    df$margin_estimation_settings <- NA_character_
+  }
+  return(df)
 }
 
 check_and_run_param_list <- function(param_list, studies) {
@@ -333,6 +357,7 @@ check_and_run_param_list <- function(param_list, studies) {
     # remove the closure fields since they take up a lot of memory
     results_with_metrics$posterior <- NULL
     results_with_metrics$sample_prior <- NULL
+    results_with_metrics <- add_params_specific_columns(results_with_metrics, params)
     print(glue::glue("Saving results to {file_name}"))
     saveRDS(results_with_metrics, file_name)
     analys_res$results <- results_with_metrics

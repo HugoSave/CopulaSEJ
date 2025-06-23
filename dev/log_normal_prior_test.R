@@ -142,10 +142,10 @@ p2 <- ggplot(plot_data_selected, aes(x = x, y = density, color = sigma_label)) +
   scale_color_manual(values = colors, name = expression(sigma[prior]),
                      labels = parse(text = variance_labels)) +
   labs(
-    title = "Log-Normal Distributions: Selected Variance Values",
-    subtitle = "Mode = 1 (shown as dashed line)",
+    # title = "Log-Normal Distributions: Selected Variance Values",
+    # subtitle = "Mode = 1 (shown as dashed line)",
     x = "x",
-    y = "Denssity"
+    y = "LogNormal Density"
   ) +
   theme_minimal() +
   theme(
@@ -156,3 +156,6 @@ p2 <- ggplot(plot_data_selected, aes(x = x, y = density, color = sigma_label)) +
   xlim(0,10)
 
 print(p2)
+# Save the plot
+ggsave("dev/output/log_normal_prior_example.pdf", plot = p2, width = 10, height = 6, dpi = 300)
+

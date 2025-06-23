@@ -12,23 +12,18 @@ source("dev_utils.R")
 
 margin_comparison_file <- "output/margin_estimation_comparison.rds"
 margin_comparisons <- readRDS(margin_comparison_file)
-margin_comparisons$comb <- interaction(margin_comparisons$settings, margin_comparisons$decoupler)
-nr_na <- margin_comparisons |> group_by(comb) |> summarise(nr_na = sum(is.na(likelihoods)), 
-  nr_total = n(), percentage_na = nr_na/nr_total) |> ungroup() |> arrange(desc(nr_na))
-nr_na
 ```
 ```{r}
 # filter na 
-margin_comparisons <- margin_comparisons |> filter(is.finite(likelihoods))
 margin_comparisons$sigma <- margin_comparisons$settings |> stringr::str_split_i(":", 2) |> as.numeric()
 
 ```
 
 ```{r}
 # add 
-margin_comparisons <- margin_comparisons |>  mutate(sigma_label = case_when(
+margin_comparisons <- margin_comparisons |>  mutate(setting = case_when(
     settings == "MLE" ~ "'MLE'",
-    settings == "beta_prior" ~ "'P.E. prior'",
+    settings == "beta_prior" ~ "'PE prior'",
     TRUE ~ paste("sigma[prior]", "==", sigma)
   ))
 # Get unique sigma values and sort them
@@ -37,29 +32,87 @@ sigma_values <- sort(sigma_values)
 
 # Create the ordered levels
 sigma_expressions <- sapply(sigma_values, function(x)  paste("sigma[prior]", "==", x))
-desired_order <- c("'P.E. prior'", sigma_expressions, "'MLE'")
+desired_order <- c("'PE prior'", sigma_expressions, "'MLE'")
 
 # Convert to factor with desired order
-margin_comparisons$sigma_label <- factor(margin_comparisons$sigma_label, levels = desired_order)
+margin_comparisons$setting <- factor(margin_comparisons$setting, levels = desired_order)
+
+margin_comparisons$prediction_method <- interaction(margin_comparisons$setting, margin_comparisons$decoupler,  sep = ":")
 ```
 
 ```{r}
-split_by_setting <- margin_comparisons |> split(margin_comparisons$comb) 
-margin_settings_names <- split_by_setting |> map_chr(\(df) df$comb |> unique() |> as.character())
+split_by_setting <- margin_comparisons |> split(margin_comparisons$prediction_method) 
+margin_settings_names <- split_by_setting |> map_chr(\(df) df$prediction_method |> unique() |> as.character())
 
-margin_comparisons_CDF <- margin_comparisons |> filter(str_ends(comb, "CDF"))
-margin_comparisons_relative <- margin_comparisons |> filter(str_detect(comb, "Rel."))
+margin_comparisons_CDF <- margin_comparisons |> filter(str_ends(prediction_method, "CDF"))
+margin_comparisons_relative <- margin_comparisons |> filter(str_detect(prediction_method, "Rel."))
 margin_comparisons_relative <- margin_comparisons_relative |> dplyr::mutate(k=as.numeric(stringr::str_split_i(decoupler, "=", 2)))
 k_values <- margin_comparisons_relative$k |> unique()
 ```
+
+```{r}
+nr_na <- margin_comparisons |> group_by(decoupler, setting) |> summarise(nr_na = sum(is.na(likelihood)), 
+  nr_total = n()) |> ungroup() |> arrange(desc(nr_na))
+nr_na |> arrange(desc(nr_na))
+# save  nr_na to csv
+write_csv(nr_na, "output/margin_estimation_na_counts.csv")
+nr_na
+```
+```{r}
+margin_comparisons <- margin_comparisons |> filter(is.finite(likelihood))
+```
+
+
+```{r}
+# calculate linear error
+margin_comparisons$linear_E <- abs(margin_comparisons$realization - margin_comparisons$median)
+margin_comparisons$squared_E <- (margin_comparisons$realization - margin_comparisons$mean)^2
+# calculate the mean errors
+margin_error_table <- margin_comparisons |> group_by(decoupler, setting) |> 
+  summarise(
+    MAE_median = mean(linear_E, na.rm=TRUE),
+    MedAE_median = median(linear_E, na.rm=TRUE),
+    RMSE_mean = sqrt(mean(squared_E, na.rm=TRUE)),
+    .groups = "drop"
+  )
+margin_error_table |> arrange(MAE_median) 
+margin_error_table |> arrange(RMSE_mean) 
+# save table
+```
+
+```{r}
+p_absolute_median_error <- margin_comparisons |> ggplot(aes(x=prediction_method, y=linear_E)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(
+    title = "likelihood of Marginal Estimations",
+    y = "Absolute median-error",
+    x = "Method"
+  ) +
+  scale_x_discrete(labels=label_parsed)
+ggsave("output/marginal_comparisons_absolute_median_error.pdf", p_absolute_median_error, width=10, height=7)
+p_absolute_median_error
+```
+```{r}
+margin_comparisons |> ggplot(aes(x=prediction_method, y=squared_E)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(
+    title = "likelihood of Marginal Estimations",
+    x = "prediction_method of Settings and Decoupler",
+    y = "Squared Absolute Mean-Error"
+  )
+```
+
+
 
 
 ```{r}
 # function to make histogram_plot 
 make_histogram <- function(df) {
-  df |> ggplot(aes(x=cdf_values)) +
+  df |> ggplot(aes(x=cdf_value)) +
   geom_histogram(boundary=0, binwidth=0.05) +
-  facet_wrap(vars(sigma_label), labeller = label_parsed)
+  facet_wrap(vars(setting), labeller = label_parsed)
 }
 
 p_cdf_histogram <- margin_comparisons_CDF |> make_histogram() 
@@ -75,19 +128,19 @@ p_k_plots <- purrr::map(k_values, function(k_val) {
 purrr::walk(seq_along(p_k_plots), function(i) {
   ggsave(paste0("output/marginal_comparisons_relative_k_", k_values[i], "_histogram.pdf"), p_k_plots[[i]], width=10, height=7)
 })
-p_k_plots[[4]]
+p_k_plots[[3]]
 ```
 
 ```{r}
 plot_emperical_CDF_compaison <- function(df) {
-  ggplot(df, aes(x=cdf_values)) +
+  ggplot(df, aes(x=cdf_value)) +
     stat_ecdf() +
     geom_abline(slope=1,intercept=0,linetype="dashed") + 
-    facet_wrap(vars(sigma_label), labeller = label_parsed)
+    facet_wrap(vars(setting), labeller = label_parsed)
 }
 
 plot_emperical_CDF_compaison_sigmoid <- function(df) {
-  ggplot(df, aes(x=cdf_values)) +
+  ggplot(df, aes(x=cdf_value)) +
     stat_ecdf() +
     geom_abline(slope=1,intercept=0,linetype="dashed") + 
     facet_grid(vars(decoupler), vars(k))
@@ -114,15 +167,29 @@ ecdf_relative_plots[[4]]
 
 
 marginal_est_metrics <- split_by_setting |>   purrr::map(\(df) {
-    metrics <- calculate_uniformity_metrics(df$cdf_values)
+    metrics <- calculate_uniformity_metrics(df$cdf_value)
     tibble::tibble_row(
-      prediction_method = unique(df$comb),
+      setting = unique(df$setting),
+      prediction_method = unique(df$prediction_method),
       decoupler = unique(df$decoupler),
       settings = unique(df$settings),
       !!!metrics
     )
   })  |> purrr::list_rbind()
 
+# prediction_method columns with margin_error_table
+margin_point_estimate_table <- marginal_est_metrics |> 
+  left_join(margin_error_table, by = c("setting", "decoupler")) 
+
+margin_point_estimate_table |> select(setting, decoupler, MAE_median, MedAE_median, RMSE_mean, L1, L2) |> 
+  arrange(L1) |> 
+  write_csv("output/marginal_est_metrics.csv")
+
+# filter to only display CDF and k=0.05 relative decoupler
+margin_point_estimate_table |> filter(str_ends(prediction_method, "CDF") | str_detect(prediction_method, "0.05")) |> 
+  select(setting, decoupler, MAE_median, MedAE_median, RMSE_mean, L1, L2) |>
+  arrange(L1) |> 
+  write_csv("output/marginal_est_metrics_CDF_Rel_k_0.05.csv")
 
 # get the 5 rows with lowest cvm_statistic
 top_5_marginal_methods <- marginal_est_metrics |> arrange(L1) |> head(5)
@@ -141,6 +208,10 @@ CDF_table_best_performers <- marginal_est_metrics |> filter(str_ends(prediction_
 write_csv(CDF_table_best_performers, "output/CDF_table_best_performers.csv")
 CDF_table_best_performers
 ```
+```{r}
+# get best performers for relative decouplers
+relative_table_best_performers <- marginal_est_metrics |> filter(str_detect(prediction_method, "Rel.")) |> arrange(L1)
+```
 
 
 
@@ -148,9 +219,9 @@ CDF_table_best_performers
 
 
 
-#margin_comparisons |> filter(comb=="betaH:1.s((q-m)/(|m|+e))") 
+#margin_comparisons |> filter(prediction_method=="betaH:1.s((q-m)/(|m|+e))") 
 make_likelihood_boxplots <- function(df) {
-  df |>  filter(likelihoods<10)  |> ggplot2::ggplot(aes(x=comb, y=likelihoods)) +
+  df |>  filter(likelihood<10)  |> ggplot2::ggplot(aes(x=prediction_method, y=likelihood)) +
   geom_boxplot() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
 }
@@ -159,12 +230,12 @@ margin_comparisons_CDF |> make_likelihood_boxplots()
 margin_comparisons |> make_likelihood_boxplots()
 ```
 ```{r}
-margin_comparisons |> filter(is.finite(likelihoods)) |> group_by(comb) |> summarise(
-  mean_likelihoods=mean(likelihoods),
-  median_likelihoods=median(likelihoods),
-  sd_likelihoods=sd(likelihoods),
-  min_likelihoods=min(likelihoods),
-  max_likelihoods=max(likelihoods),
-  q_5 = quantile(likelihoods, 0.05)
+margin_comparisons |> filter(is.finite(likelihood)) |> group_by(prediction_method) |> summarise(
+  mean_likelihoods=mean(likelihood),
+  median_likelihoods=median(likelihood),
+  sd_likelihoods=sd(likelihood),
+  min_likelihoods=min(likelihood),
+  max_likelihoods=max(likelihood),
+  q_5 = quantile(likelihood, 0.05)
 ) |> arrange(q_5)
 ```
