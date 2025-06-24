@@ -320,12 +320,15 @@ fit_copula <- function(pseudo_obs, copula_model = "joe",
     return(fit_hiarchical_copula(pseudo_obs, eta=eta, recover_numerical_failure=recover_numerical_failure))
   }
 
-  res <- checkmate::check_number(nrow(pseudo_obs), lower=10)
-  if (is.character(res)) {
-    checkmate::makeAssertion(pseudo_obs, "Number of training samples must be at least 10. This comes from a hard coded limit in the rvinecopula (and vineCopula) package when fitting a copula.",
-                             "nrow(pseudo_obs)",
-                             NULL)
+  if (copula_model == "vine") {
+    res <- checkmate::check_number(nrow(pseudo_obs), lower=10)
+    if (is.character(res)) {
+      checkmate::makeAssertion(pseudo_obs, "Number of training samples must be at least 10. This comes from a hard coded limit in the rvinecopula (and vineCopula) package when fitting a copula.",
+                               "nrow(pseudo_obs)",
+                               NULL)
+    }
   }
+
   error_length = ncol(pseudo_obs)
   lower = NULL
   upper = NULL
@@ -333,27 +336,27 @@ fit_copula <- function(pseudo_obs, copula_model = "joe",
 
   # fit a copula to the data
   if (copula_model == "joe") {
-    copula_model <- copula::joeCopula(dim = error_length)
+    copula_obj <- copula::joeCopula(dim = error_length)
     lower = 1
     upper = 18.7 # 18.7 Corresponds to an Kendall tau of 0.9. For numerical reasons we limit it to this.
   } else if (copula_model == "frank") {
-    copula_model <- copula::frankCopula(dim = error_length)
+    copula_obj <- copula::frankCopula(dim = error_length)
     lower = 0
     upper = 38.28 # 38.28 Corresponds to an Kendall tau of 0.9. For numerical reasons we limit it to this.
   } else if (copula_model == "clayton") {
-    copula_model <- copula::claytonCopula(dim = error_length)
+    copula_obj <- copula::claytonCopula(dim = error_length)
     lower = 0
     upper = 18
   } else if (copula_model == "gumbel") {
-    copula_model <- copula::gumbelCopula(dim = error_length)
+    copula_obj <- copula::gumbelCopula(dim = error_length)
     lower = 1
     upper = 10
   } else if (copula_model == "t") {
-    copula_model <- copula::tCopula(dim = error_length)
+    copula_obj <- copula::tCopula(dim = error_length)
     lower = -9.8
     upper = 9.8
   } else if (copula_model == "normal") {
-    copula_model <- copula::normalCopula(dim = error_length, dispstr = "un")
+    copula_obj <- copula::normalCopula(dim = error_length, dispstr = "un")
     lower = -9.8
     upper = 9.8
     copula_fit_method="itau"
@@ -378,18 +381,26 @@ fit_copula <- function(pseudo_obs, copula_model = "joe",
   }
 
   # check if copula is normal or tcopula class
-  if (is(copula_model, "acopula")) {
+  if (copula_model %in% c("frank", "joe", "clayton", "gumbel")) {
     # mpl does not work well for higher dimensions and gives the same output as ml
     # regardless. Only the estimation of the standard error is different.
     kendall_guess <- mean(copula::P2p(copula::corKendall(pseudo_obs)))
+    if (!is.finite(kendall_guess)) {
+      kendall_guess <- 0.5 # if we cannot estimate the Kendall tau, use 0.5 as a guess
+    }
+    kendall_guess <- pmin(kendall_guess, 0.9) # make sure we don't start too high)
+    # if kendall guess is negative, set it to 0. Shown to better converge
     if (kendall_guess < 0) {
       kendall_guess = 0
     }
-    alpha_start <- copula::iTau(copula_model, kendall_guess)
+    alpha_start <- copula::iTau(copula_obj, kendall_guess)
+    # this should not theoretically be needed but because of rounding we do it
+    alpha_start <- pmax(alpha_start, lower)
+    alpha_start <- pmin(alpha_start, upper)
 
     # optim.control=list(factr=1e8), makes so that the tolerance is about 1e-7.
     fitted_params <- copula::fitCopula(
-      copula_model,
+      copula_obj,
       pseudo_obs,
       method = "mpl",
       start = alpha_start,
@@ -401,7 +412,7 @@ fit_copula <- function(pseudo_obs, copula_model = "joe",
     )
   } else{
     fitted_params <- copula::fitCopula(
-      copula_model,
+      copula_obj,
       pseudo_obs,
       method = copula_fit_method,
       estimate.variance = FALSE,
@@ -834,7 +845,7 @@ estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_va
         rlang::abort(paste0("Stan model did not converge. Error message is: ", conditionMessage(e)),
                      class="stan_optimization_error", parent=e)
       }
-    },
+    }
   )
 
   return(create_beta_dist_object(fit_map$par[[1]],  fit_map$par[[2]], support))
@@ -1476,8 +1487,8 @@ fit_JC_model <- function(training_set, test_set, realizations) {
   D = dim(training_set)[3]
   checkmate::assert_numeric(realizations, len=N, any.missing=FALSE, finite=TRUE)
 
-  test_medians <- training_set[,,2] # NxE matrix
-  errors <- matrix(realizations, nrow = N, ncol=E) - test_medians # NxE
+  training_medians <- training_set[,,2] # NxE matrix
+  errors <- matrix(realizations, nrow = N, ncol=E) - training_medians # NxE
 
   beliefs <- linear_distribution_interpolation_matrix_w_overshoot(
     test_set,
@@ -1487,20 +1498,22 @@ fit_JC_model <- function(training_set, test_set, realizations) {
   )
   cdf_values <- purrr::imap(beliefs, \(belief, i) {
     # calculate the cdf values for the errors
-    belief$cdf(errors[,i])
+    belief$cdf(training_medians[,i] + errors[,i]) # add error and median to be in the Q space
   }) |> do.call(what=cbind) # NxE matrix
   # fit the copula to the cdf values
-  cdf_values <- clamp_cdf_values(cdf_values) # clamp cdf values to [0,1] range
-  error_copula <- fit_copula(cdf_values, "frank")
+  #browser()
+  #cdf_values <- copula::pobs(errors)
+  cdf_values <- clamp_cdf_values(cdf_values) # clamp cdf values to (0,1) range
+  error_copula <- fit_copula(cdf_values, "frank", copula_fit_method="ml")
 
-  log_density <- function(q_vals) {
+  log_density <- function(q_vals) { # M long
     # calculate the log density of the values
     pdf_values <- purrr::map(beliefs, \(belief) belief$pdf(q_vals)) |>
-      do.call(what=cbind) # NxE
+      do.call(what=cbind) # MxE
     cdf_values <- purrr::map(beliefs, \(belief) belief$cdf(q_vals)) |>
-      do.call(what=cbind) # NxE
+      do.call(what=cbind) # MxE
     # calculate the log density using the copula
-    log(error_copula$density(cdf_values)) +
+    log(error_copula$density(1-cdf_values)) +
       rowSums(log(pdf_values)) # sum over the experts
   }
 
@@ -1838,15 +1851,8 @@ study_test_performance <- function(study_data, sim_params = NULL) {
         q_support_restriction = p$q_support_restriction
       )
       posterior <- res$posterior
-    } else if (p$prediction_method == "perfect_expert") {
-      res <- copula_fit_and_predict_JC_assumption(
-        training_set,
-        test_set,
-        p$copula_model,
-        p$interpolation,
-        p$error_metric,
-        p$summarizing_function
-      )
+    } else if (p$prediction_method == "jouini_clemen") {
+      res <- fit_JC_model(training_array, test_matrix, training_realizations)
       posterior <- res$posterior
     } else if (p$prediction_method == "median_average") {
       prediction <- median_average_predict(test_set)

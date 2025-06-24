@@ -463,7 +463,7 @@ run_performance_test <- function() {
   #  analys_res$results <- results_with_metrics
   #  analys_res
   #}, mc.cores = 2)
-  res_combined <- check_and_run_param_list(param_list[23], data_list_short[13])
+  res_combined <- check_and_run_param_list(param_list, data_list_short)
 
 
   file_name = "dev/output/compare_performance_simulation.rds"

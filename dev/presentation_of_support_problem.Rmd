@@ -15,8 +15,8 @@ summ_fun <- get_three_quantiles_summarizing_function()$f
 # Example partioning metric
 
 ```{r}
-study <- studies[[5]]
-test_question_id <- 5
+study <- studies[[2]]
+test_question_id <- 3
 test_set <- study |> filter(question_id == test_question_id)
 training_set <- study |> filter(question_id != test_question_id)
 test_m_matrix <- test_set |> study_df_single_question_to_summary_matrix(summ_fun, k_percentiles)
@@ -119,7 +119,6 @@ plot(density(s))
 ```{r}
 res$decoupler_margins |> plot_distributions("pdf")
 ```
-
 
 ```{r}
 JC_model <- fit_JC_model(training_assessments, test_m_matrix, realizations)
