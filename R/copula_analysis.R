@@ -756,7 +756,7 @@ create_beta_dist_object <- function(a, b, support) {
               beta_params = params))
 }
 
-estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_var=1/12, prior_std=0.1, clamp_epsilon=0.001, out_of_boundary="clamp", prior_form="lognormal") {
+estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_var=1/12, prior_std=0.1, clamp_epsilon=0.001, out_of_boundary="clamp", prior_form="lognormal", recover=TRUE) {
   checkmate::assert_subset(prior_form, c("lognormal", "gamma"))
   beta_param_centers <- mean_variance_to_beta_params(beta_mean, beta_var, support[1], support[2]) # Wait I am doing this a bit wrong... Needs to be adjusted for the scaling
 
@@ -773,9 +773,14 @@ estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_va
       x <= support[1] | x >= support[2]
     })
     if (length(x) == 0) {
-      rlang::warn("No observations left after removing observations on and outside the support boundary. Returning a beta distribution with the prior parameters.",
-                    class="warning_observations_outside_support")
-      return(create_beta_dist_object(beta_param_centers[1], beta_param_centers[2], support))
+      if (recover) {
+        rlang::warn("No observations left after removing observations on and outside the support boundary. Returning a beta distribution with the prior parameters.",
+                      class="warning_observations_outside_support")
+        return(create_beta_dist_object(beta_param_centers[1], beta_param_centers[2], support))
+      } else {
+        rlang::abort("No observations left after removing observations on and outside the support boundary.",
+                     class="error_observations_outside_support")
+      }
     }
   } else {
     stop(glue::glue("Unknown out_of_boundary strategy {out_of_boundary} for estimate_margin_beta_hiarch"))
@@ -813,11 +818,23 @@ estimate_margin_beta_hiarch <- function(obs_vec, support, beta_mean=0.5, beta_va
     )
   }
 
-
-  fit_map <- rstan::optimizing(
-    model,
-    #verbose=TRUE,
-    data = data_list # , check_data = FALSE - might create some performance boost
+  tryCatch({
+    fit_map <- rstan::optimizing(
+      model,
+      #verbose=TRUE,
+      data = data_list # , check_data = FALSE - might create some performance boost
+    )
+    },
+    error = function(e) {
+      if (recover) {
+        rlang::warn(paste0("Stan model did not converge. Error message is: ", conditionMessage(e), ". Returning a beta distribution with the prior parameters."),
+                    class="stan_optimization_warning")
+        return(create_beta_dist_object(beta_param_centers[1], beta_param_centers[2], support))
+      } else {
+        rlang::abort(paste0("Stan model did not converge. Error message is: ", conditionMessage(e)),
+                     class="stan_optimization_error", parent=e)
+      }
+    },
   )
 
   return(create_beta_dist_object(fit_map$par[[1]],  fit_map$par[[2]], support))
@@ -952,7 +969,7 @@ estimate_margin_kde <- function(obs, support, bw="SJ", package="stats") {
 #' @export
 #'
 #' @examples
-estimate_margins <- function(observations, supports=NULL, method="beta", overshoot=0.1, out_of_boundary="discard", bw="SJ", beta_mean=0.5, beta_var=1/12, prior_std=0.1) {
+estimate_margins <- function(observations, supports=NULL, method="beta", overshoot=0.1, out_of_boundary="discard", bw="SJ", beta_mean=0.5, beta_var=1/12, prior_std=0.1, numerical_recovery=TRUE) {
   checkmate::assert_matrix(observations, "numeric")
   nr_dims = ncol(observations)
   checkmate::assert(
@@ -984,11 +1001,19 @@ estimate_margins <- function(observations, supports=NULL, method="beta", oversho
   margins <- purrr::map(seq_len(ncol(observations)), function(i) {
     obs <- observations[, i]
     if (method == "beta_MLE" || method=="beta"){
-      return(estimate_margin_beta(obs, supports[[i]], overshoot, out_of_boundary=out_of_boundary))
-    } else if (method =="kde") {
+      tryCatch({
+        return(estimate_margin_beta(obs, supports[[i]], overshoot, out_of_boundary=out_of_boundary))
+      }, error = function(e) {
+        if (numerical_recovery) {  #
+          warning(glue::glue("estimate_margin_beta failed for d={i}, falling back to estimate_margin_beta_prior. Error: {conditionMessage(e)}"))
+          return(estimate_margin_beta_prior(supports[[i]], beta_mean[i], beta_var[i]))
+        } else {
+          stop(e)  # re-throw the original error if recovery is not enabled
+        }
+      })    } else if (method =="kde") {
       return(estimate_margin_kde(obs, supports[[i]], bw=bw))
     } else if (method == "beta_MAP") {
-      return(estimate_margin_beta_hiarch(obs, supports[[i]], beta_mean=beta_mean[i], beta_var=beta_var[i], prior_std=prior_std))
+      return(estimate_margin_beta_hiarch(obs, supports[[i]], beta_mean=beta_mean[i], beta_var=beta_var[i], prior_std=prior_std, recover=numerical_recovery))
     } else if (method == "uniform") {
       if (is.null(supports[[i]])) {
         supports[[i]] <- range(obs) |> widen_support(overshoot=overshoot)

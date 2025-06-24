@@ -326,7 +326,6 @@ add_params_specific_columns <- function(df, params) {
   # Add specific columns to the dataframe based on the parameters
   df$params_name <- parameter_shortname(params)
   df$prediction_method <- prediction_method_shortname(params$prediction_method)
-  browser()
   if (params$prediction_method == "copula") {
     df$copula_model <- copula_shortname(params$copula_model)
     df$decoupler <- params$error_metric$short_name
@@ -390,22 +389,27 @@ run_performance_test <- function() {
     ),
     list(
       method = "beta_MAP",
-      prior_std = 0.1
+      prior_std = 0.1,
+      numerical_recover = TRUE
     ),
     list(
       method = "beta_MAP",
-      prior_std = 0.5
+      prior_std = 0.5,
+      numerical_recover = TRUE
     ),
     list(
       method = "beta_MAP",
-      prior_std = 1
+      prior_std = 1,
+      numerical_recover = TRUE
     ),
     list(
       method = "beta_MAP",
-      prior_std = 1.5
+      prior_std = 1.5,
+      numerical_recover = TRUE
     ),
     list(
-      method = "beta_MLE"
+      method = "beta_MLE",
+      numerical_recover = TRUE
     )
   )
   copula_models <- list("indep", "hierarchical")
@@ -459,7 +463,7 @@ run_performance_test <- function() {
   #  analys_res$results <- results_with_metrics
   #  analys_res
   #}, mc.cores = 2)
-  res_combined <- check_and_run_param_list(param_list, data_list_short)
+  res_combined <- check_and_run_param_list(param_list[23], data_list_short[13])
 
 
   file_name = "dev/output/compare_performance_simulation.rds"
